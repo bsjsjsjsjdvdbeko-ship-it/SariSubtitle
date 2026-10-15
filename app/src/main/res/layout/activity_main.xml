@@ -10,7 +10,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="8dp">
+        android:padding="6dp">
 
         <EditText
             android:id="@+id/urlInput"
@@ -36,26 +36,37 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="8dp">
+        android:padding="6dp">
 
         <Button
             android:id="@+id/checkTimeButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:textSize="11sp"
             android:text="@string/btn_check_time" />
+
+        <Button
+            android:id="@+id/loadSrtButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="11sp"
+            android:text="تحميل SRT" />
 
         <Button
             android:id="@+id/toggleOverlayButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:textSize="11sp"
             android:text="ترجمة" />
 
         <Button
             android:id="@+id/reloadXButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:textSize="11sp"
             android:text="@string/btn_reload_x" />
     </LinearLayout>
 
@@ -64,10 +75,11 @@
         android:id="@+id/statusText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:padding="8dp"
+        android:padding="6dp"
         android:fontFamily="monospace"
-        android:textSize="11sp"
+        android:textSize="10sp"
         android:textColor="#00FF88"
+        android:maxLines="5"
         android:text="@string/status_ready" />
 
     <!-- WebView + Overlay -->
