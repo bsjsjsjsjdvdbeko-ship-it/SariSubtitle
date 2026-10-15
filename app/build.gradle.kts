@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.sari.subtitle"
+    namespace = "com.sari.subtitle.v2"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.sari.subtitle"
+        applicationId = "com.sari.subtitle.v2"
         minSdk = 29
         targetSdk = 35
         versionCode = 1
