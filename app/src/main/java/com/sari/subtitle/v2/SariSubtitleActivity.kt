@@ -12,16 +12,13 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import org.json.JSONObject
 
 /**
- * Sari Subtitle — المرحلة 1
- *
- * الهدف الوحيد من هذه المرحلة:
- *   1. التطبيق يفتح بدون انهيار.
- *   2. WebView يُحمّل X.
- *   3. currentTime يُقرأ ويُطبع في statusText كل 500ms.
- *
- * لا توجد ترجمة بعد. لا توجد طبقة رسم. هذه أساسات فقط.
+ * Sari Subtitle — المرحلة 1.2
+ * - اختيار الفيديو المرئي فقط (بدل الأول في DOM)
+ * - Polling مستقل عن التنقل
+ * - عرض القيم الخام للتشخيص
  */
 class SariSubtitleActivity : AppCompatActivity() {
 
@@ -59,7 +56,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                 super.onPageFinished(view, url)
                 statusText.text = "تم التحميل: $url"
                 injectAutoShow()
-                startPolling()
+                // لا نبدأ Polling هنا — نتركه يعمل باستمرار
             }
         }
         webView.webChromeClient = WebChromeClient()
@@ -80,13 +77,12 @@ class SariSubtitleActivity : AppCompatActivity() {
             pollCurrentTimeOnce()
         }
 
-        // تحميل افتراضي
+        // ⚠️ ابدأ Polling فوراً — لا ينتظر onPageFinished
+        startPolling()
+
         webView.loadUrl("https://x.com/")
     }
 
-    /**
-     * حقن ضغط "Show" التلقائي (نفس منطق XTimeTest).
-     */
     private fun injectAutoShow() {
         val js = """
             (function() {
@@ -112,17 +108,13 @@ class SariSubtitleActivity : AppCompatActivity() {
                   }
                 } catch(e){}
               }
-              window.__sariAutoShowInterval = setInterval(scan, 1000);
+              window.__sariAutoShowInterval = setInterval(scan, 1500);
               scan();
             })();
         """.trimIndent()
         webView.evaluateJavascript(js, null)
     }
 
-    /**
-     * بدء الاستماع الدوري لـ currentTime (كل 500ms في هذه المرحلة).
-     * في المرحلة 2 سنخفضها إلى 100ms.
-     */
     private fun startPolling() {
         if (polling) return
         polling = true
@@ -130,15 +122,11 @@ class SariSubtitleActivity : AppCompatActivity() {
             override fun run() {
                 if (!polling) return
                 pollCurrentTimeOnce()
-                handler.postDelayed(this, 500L)
+                handler.postDelayed(this, 250L)  // 250ms
             }
         })
     }
 
-    /**
-     * استعلام currentTime من الفيديو الحالي في WebView.
-     * يعيد: { currentTime, duration, paused, readyState, videoCount }
-     */
     private fun pollCurrentTimeOnce() {
         val js = """
             (function() {
@@ -155,14 +143,48 @@ class SariSubtitleActivity : AppCompatActivity() {
                   return acc;
                 }
                 var vids = collect(document, []);
-                if (vids.length === 0) return JSON.stringify({videoCount:0});
-                var v = vids[0];
+                if (vids.length === 0) {
+                  return JSON.stringify({
+                    videoCount: 0,
+                    totalVideos: 0,
+                    message: "no video"
+                  });
+                }
+
+                // اختر الفيديو المرئي الأكبر على الشاشة
+                var best = null;
+                var maxArea = 0;
+                for (var i = 0; i < vids.length; i++) {
+                  try {
+                    var v = vids[i];
+                    var r = v.getBoundingClientRect();
+                    if (r.width < 100 || r.height < 100) continue;
+                    if (r.bottom < 0 || r.top > window.innerHeight) continue;
+                    var vTop = Math.max(0, r.top);
+                    var vBot = Math.min(window.innerHeight, r.bottom);
+                    var vH = Math.max(0, vBot - vTop);
+                    var area = r.width * vH;
+                    if (area > maxArea) {
+                      maxArea = area;
+                      best = v;
+                    }
+                  } catch(e){}
+                }
+                if (!best) best = vids[0];
+
+                var t = Number(best.currentTime);
+                var d = Number(best.duration);
+
                 return JSON.stringify({
-                  videoCount: vids.length,
-                  currentTime: Number(v.currentTime) || 0,
-                  duration: Number(v.duration) || 0,
-                  paused: !!v.paused,
-                  readyState: v.readyState
+                  videoCount: 1,
+                  totalVideos: vids.length,
+                  currentTime: Number.isFinite(t) ? t : 0,
+                  duration: Number.isFinite(d) ? d : 0,
+                  durationRaw: String(best.duration),
+                  paused: !!best.paused,
+                  readyState: best.readyState,
+                  videoWidth: best.videoWidth,
+                  videoHeight: best.videoHeight
                 });
               } catch(e) {
                 return JSON.stringify({error: String(e)});
@@ -183,40 +205,41 @@ class SariSubtitleActivity : AppCompatActivity() {
 
     private fun formatTime(json: String): String {
         return try {
-            val o = org.json.JSONObject(json)
+            val o = JSONObject(json)
             if (o.has("error")) return "خطأ: ${o.getString("error")}"
-            val count = o.optInt("videoCount", 0)
-            if (count == 0) return "لا يوجد فيديو — فيديوهات: 0"
+
+            val total = o.optInt("totalVideos", 0)
+            if (total == 0) {
+                return "لا يوجد فيديو — total=0  [tick ${System.currentTimeMillis() % 100000}]"
+            }
+
             val t = o.optDouble("currentTime", 0.0)
             val d = o.optDouble("duration", 0.0)
+            val dRaw = o.optString("durationRaw", "?")
             val p = o.optBoolean("paused", false)
             val r = o.optInt("readyState", 0)
+            val w = o.optInt("videoWidth", 0)
+            val h = o.optInt("videoHeight", 0)
+
             val pos = formatSec(t)
             val dur = formatSec(d)
             val state = if (p) "⏸" else "▶"
-            "video: $pos / $dur  $state  rs=$r  (videos=$count)"
+            val tick = System.currentTimeMillis() % 100000
+
+            "video: $pos / $dur  $state  rs=$r  (n=$total, ${w}x${h})\n" +
+            "خام → t=$t  d=$d  durRaw=$dRaw\n" +
+            "tick=$tick"
         } catch (e: Exception) {
             "تعذر التحليل: ${e.message}\n$json"
         }
     }
 
     private fun formatSec(s: Double): String {
-        if (s.isNaN() || s.isInfinite()) return "--:--"
+        if (s.isNaN() || s.isInfinite() || s < 0) return "--:--"
         val total = s.toInt()
         val m = total / 60
         val sec = total % 60
         return "%02d:%02d".format(m, sec)
-    }
-
-    override fun onPause() {
-        super.onPause()
-        polling = false
-        handler.removeCallbacksAndMessages(null)
-    }
-
-    override fun onResume() {
-        super.onResume()
-        if (!polling) startPolling()
     }
 
     override fun onDestroy() {
