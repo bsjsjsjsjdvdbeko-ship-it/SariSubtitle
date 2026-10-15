@@ -15,19 +15,20 @@ import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONObject
 
 /**
- * Sari Subtitle — المرحلة 1.2
- * - اختيار الفيديو المرئي فقط (بدل الأول في DOM)
- * - Polling مستقل عن التنقل
- * - عرض القيم الخام للتشخيص
+ * Sari Subtitle — المرحلة 2.1
+ * - Overlay فوق WebView (نص ثابت للاختبار)
+ * - زر "ترجمة" للتبديل
  */
 class SariSubtitleActivity : AppCompatActivity() {
 
     private lateinit var urlInput: EditText
     private lateinit var statusText: TextView
     private lateinit var webView: WebView
+    private lateinit var subtitleOverlay: SubtitleOverlay
 
     private val handler = Handler(Looper.getMainLooper())
     private var polling = false
+    private var overlayOn = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,6 +38,7 @@ class SariSubtitleActivity : AppCompatActivity() {
         urlInput = findViewById(R.id.urlInput)
         statusText = findViewById(R.id.statusText)
         webView = findViewById(R.id.webView)
+        subtitleOverlay = findViewById(R.id.subtitleOverlay)
 
         webView.settings.apply {
             javaScriptEnabled = true
@@ -56,7 +58,6 @@ class SariSubtitleActivity : AppCompatActivity() {
                 super.onPageFinished(view, url)
                 statusText.text = "تم التحميل: $url"
                 injectAutoShow()
-                // لا نبدأ Polling هنا — نتركه يعمل باستمرار
             }
         }
         webView.webChromeClient = WebChromeClient()
@@ -77,10 +78,27 @@ class SariSubtitleActivity : AppCompatActivity() {
             pollCurrentTimeOnce()
         }
 
-        // ⚠️ ابدأ Polling فوراً — لا ينتظر onPageFinished
-        startPolling()
+        findViewById<Button>(R.id.toggleOverlayButton).setOnClickListener {
+            toggleOverlay()
+        }
 
+        startPolling()
         webView.loadUrl("https://x.com/")
+    }
+
+    /**
+     * تبديل حالة الـ Overlay.
+     * عند التشغيل: يعرض نصاً ثابتاً (سيُستبدل بـ SRT لاحقاً).
+     */
+    private fun toggleOverlay() {
+        overlayOn = !overlayOn
+        if (overlayOn) {
+            subtitleOverlay.show("Sari Subtitle — Test 测试 العربية")
+            statusText.text = "✅ الترجمة مفعّلة (نص ثابت)"
+        } else {
+            subtitleOverlay.hide()
+            statusText.text = "❌ الترجمة معطّلة"
+        }
     }
 
     private fun injectAutoShow() {
@@ -122,7 +140,7 @@ class SariSubtitleActivity : AppCompatActivity() {
             override fun run() {
                 if (!polling) return
                 pollCurrentTimeOnce()
-                handler.postDelayed(this, 250L)  // 250ms
+                handler.postDelayed(this, 250L)
             }
         })
     }
@@ -144,14 +162,8 @@ class SariSubtitleActivity : AppCompatActivity() {
                 }
                 var vids = collect(document, []);
                 if (vids.length === 0) {
-                  return JSON.stringify({
-                    videoCount: 0,
-                    totalVideos: 0,
-                    message: "no video"
-                  });
+                  return JSON.stringify({totalVideos: 0});
                 }
-
-                // اختر الفيديو المرئي الأكبر على الشاشة
                 var best = null;
                 var maxArea = 0;
                 for (var i = 0; i < vids.length; i++) {
@@ -164,23 +176,16 @@ class SariSubtitleActivity : AppCompatActivity() {
                     var vBot = Math.min(window.innerHeight, r.bottom);
                     var vH = Math.max(0, vBot - vTop);
                     var area = r.width * vH;
-                    if (area > maxArea) {
-                      maxArea = area;
-                      best = v;
-                    }
+                    if (area > maxArea) { maxArea = area; best = v; }
                   } catch(e){}
                 }
                 if (!best) best = vids[0];
-
                 var t = Number(best.currentTime);
                 var d = Number(best.duration);
-
                 return JSON.stringify({
-                  videoCount: 1,
                   totalVideos: vids.length,
                   currentTime: Number.isFinite(t) ? t : 0,
                   duration: Number.isFinite(d) ? d : 0,
-                  durationRaw: String(best.duration),
                   paused: !!best.paused,
                   readyState: best.readyState,
                   videoWidth: best.videoWidth,
@@ -196,26 +201,24 @@ class SariSubtitleActivity : AppCompatActivity() {
             val decoded = try {
                 org.json.JSONTokener(raw ?: "null").nextValue().toString()
             } catch (_: Exception) { "null" }
-
-            runOnUiThread {
-                statusText.text = formatTime(decoded)
-            }
+            runOnUiThread { onTimeUpdate(decoded) }
         }
     }
 
-    private fun formatTime(json: String): String {
-        return try {
+    private fun onTimeUpdate(json: String) {
+        try {
             val o = JSONObject(json)
-            if (o.has("error")) return "خطأ: ${o.getString("error")}"
-
+            if (o.has("error")) {
+                statusText.text = "خطأ: ${o.getString("error")}"
+                return
+            }
             val total = o.optInt("totalVideos", 0)
             if (total == 0) {
-                return "لا يوجد فيديو — total=0  [tick ${System.currentTimeMillis() % 100000}]"
+                statusText.text = "لا يوجد فيديو — total=0"
+                return
             }
-
             val t = o.optDouble("currentTime", 0.0)
             val d = o.optDouble("duration", 0.0)
-            val dRaw = o.optString("durationRaw", "?")
             val p = o.optBoolean("paused", false)
             val r = o.optInt("readyState", 0)
             val w = o.optInt("videoWidth", 0)
@@ -225,12 +228,12 @@ class SariSubtitleActivity : AppCompatActivity() {
             val dur = formatSec(d)
             val state = if (p) "⏸" else "▶"
             val tick = System.currentTimeMillis() % 100000
+            val overlayState = if (overlayOn) "ON" else "OFF"
 
-            "video: $pos / $dur  $state  rs=$r  (n=$total, ${w}x${h})\n" +
-            "خام → t=$t  d=$d  durRaw=$dRaw\n" +
-            "tick=$tick"
+            statusText.text = "video: $pos / $dur  $state  rs=$r  (${w}x${h})  ov=$overlayState\n" +
+                "tick=$tick"
         } catch (e: Exception) {
-            "تعذر التحليل: ${e.message}\n$json"
+            statusText.text = "تعذر التحليل: ${e.message}"
         }
     }
 

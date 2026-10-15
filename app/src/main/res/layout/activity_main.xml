@@ -31,7 +31,7 @@
             android:text="@string/btn_load" />
     </LinearLayout>
 
-    <!-- شريط الأدوات السفلي (مؤقت للمرحلة 1) -->
+    <!-- شريط الأدوات السفلي -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -44,6 +44,13 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="@string/btn_check_time" />
+
+        <Button
+            android:id="@+id/toggleOverlayButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="ترجمة" />
 
         <Button
             android:id="@+id/reloadXButton"
@@ -59,11 +66,11 @@
         android:layout_height="wrap_content"
         android:padding="8dp"
         android:fontFamily="monospace"
-        android:textSize="12sp"
+        android:textSize="11sp"
         android:textColor="#00FF88"
         android:text="@string/status_ready" />
 
-    <!-- WebView -->
+    <!-- WebView + Overlay -->
     <FrameLayout
         android:id="@+id/webContainer"
         android:layout_width="match_parent"
@@ -72,6 +79,11 @@
 
         <WebView
             android:id="@+id/webView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <com.sari.subtitle.v2.SubtitleOverlay
+            android:id="@+id/subtitleOverlay"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
