@@ -15,9 +15,22 @@ android {
         versionName = "0.1.0-stage1"
     }
 
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -30,7 +43,6 @@ android {
         jvmTarget = "17"
     }
 
-    // ⚠️ مهم: kotlin/ كمصدر إضافي (تعلمنا من XTimeTest)
     sourceSets["main"].java.srcDirs(
         "src/main/java",
         "src/main/kotlin"

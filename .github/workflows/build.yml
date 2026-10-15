@@ -31,8 +31,27 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Create debug keystore
+        run: |
+          mkdir -p ~/.android
+          keytool -genkeypair \
+            -keystore ~/.android/debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
+
+      - name: Verify APK signature
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          ls -la "$APK"
+          unzip -l "$APK" | grep META-INF || echo "❌ NOT SIGNED"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
