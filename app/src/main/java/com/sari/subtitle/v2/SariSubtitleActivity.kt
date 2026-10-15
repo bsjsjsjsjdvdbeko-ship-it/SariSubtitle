@@ -19,9 +19,9 @@ import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONObject
 
 /**
- * Sari Subtitle — المرحلة 2.2
- * - تحميل SRT من ملف محلي
- * - عرض الترجمات الفعلية حسب currentTime
+ * Sari Subtitle — المرحلة 3.1
+ * - إعدادات المظهر (حجم، لون، موضع، خلفية).
+ * - حفظ تلقائي في SharedPreferences.
  */
 class SariSubtitleActivity : AppCompatActivity() {
 
@@ -33,24 +33,27 @@ class SariSubtitleActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var webView: WebView
     private lateinit var subtitleOverlay: SubtitleOverlay
-    private lateinit var loadSrtButton: Button
 
+    private lateinit var settings: SubtitleSettings
     private val handler = Handler(Looper.getMainLooper())
     private val repo = SubtitleRepository()
     private var polling = false
     private var overlayOn = false
-    private var currentSrtName: String? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        settings = SubtitleSettings(this)
+
         urlInput = findViewById(R.id.urlInput)
         statusText = findViewById(R.id.statusText)
         webView = findViewById(R.id.webView)
         subtitleOverlay = findViewById(R.id.subtitleOverlay)
-        loadSrtButton = findViewById(R.id.loadSrtButton)
+
+        // طبق الإعدادات المحفوظة فوراً
+        subtitleOverlay.applySettings(settings)
 
         webView.settings.apply {
             javaScriptEnabled = true
@@ -94,33 +97,30 @@ class SariSubtitleActivity : AppCompatActivity() {
             toggleOverlay()
         }
 
-        loadSrtButton.setOnClickListener {
+        findViewById<Button>(R.id.loadSrtButton).setOnClickListener {
             openSrtPicker()
+        }
+
+        findViewById<Button>(R.id.settingsButton).setOnClickListener {
+            SettingsDialog.show(this, settings, subtitleOverlay) {
+                Toast.makeText(this, "✅ تم حفظ الإعدادات", Toast.LENGTH_SHORT).show()
+            }
         }
 
         startPolling()
         webView.loadUrl("https://x.com/")
     }
 
-    /**
-     * فتح مدير الملفات لاختيار SRT.
-     */
     private fun openSrtPicker() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
-            putExtra(
-                Intent.EXTRA_MIME_TYPES,
-                arrayOf(
-                    "application/x-subrip",
-                    "text/plain",
-                    "text/*",
-                    "application/octet-stream"
-                )
-            )
         }
         try {
-            startActivityForResult(intent, REQ_PICK_SRT)
+            startActivityForResult(
+                Intent.createChooser(intent, "اختر ملف SRT"),
+                REQ_PICK_SRT
+            )
         } catch (e: Exception) {
             Toast.makeText(this, "لا يوجد مدير ملفات", Toast.LENGTH_SHORT).show()
         }
@@ -129,14 +129,10 @@ class SariSubtitleActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQ_PICK_SRT && resultCode == Activity.RESULT_OK) {
-            val uri: Uri? = data?.data
-            if (uri != null) loadSrtFromUri(uri)
+            data?.data?.let { loadSrtFromUri(it) }
         }
     }
 
-    /**
-     * تحميل ملف SRT من Uri.
-     */
     private fun loadSrtFromUri(uri: Uri) {
         try {
             val input = contentResolver.openInputStream(uri)
@@ -146,46 +142,29 @@ class SariSubtitleActivity : AppCompatActivity() {
             }
             val cues = input.use { SrtParser.parse(it) }
             if (cues.isEmpty()) {
-                Toast.makeText(this, "لم يُعثر على ترجمات في الملف", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "لا ترجمات في الملف", Toast.LENGTH_LONG).show()
                 return
             }
             repo.setCues(cues)
-            currentSrtName = getFileName(uri) ?: "SRT محمّل"
-            Toast.makeText(this, "✅ تم تحميل ${cues.size} سطر ترجمة", Toast.LENGTH_SHORT).show()
-            // تفعيل Overlay تلقائياً
-            if (!overlayOn) {
-                overlayOn = true
-            }
+            Toast.makeText(this, "✅ تم تحميل ${cues.size} سطر", Toast.LENGTH_SHORT).show()
+            if (!overlayOn) overlayOn = true
         } catch (e: Exception) {
             Toast.makeText(this, "خطأ: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
-    private fun getFileName(uri: Uri): String? {
-        return try {
-            val cursor = contentResolver.query(uri, null, null, null, null)
-            cursor?.use {
-                if (it.moveToFirst()) {
-                    val idx = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (idx >= 0) return it.getString(idx)
-                }
-            }
-            uri.lastPathSegment
-        } catch (_: Exception) { null }
-    }
-
     private fun toggleOverlay() {
         if (repo.isEmpty) {
-            Toast.makeText(this, "حمّل ملف SRT أولاً", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "حمّل SRT أولاً", Toast.LENGTH_SHORT).show()
             return
         }
         overlayOn = !overlayOn
-        if (overlayOn) {
-            Toast.makeText(this, "✅ الترجمة مفعّلة", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, "❌ الترجمة معطّلة", Toast.LENGTH_SHORT).show()
-            subtitleOverlay.hide()
-        }
+        Toast.makeText(
+            this,
+            if (overlayOn) "✅ الترجمة مفعّلة" else "❌ معطّلة",
+            Toast.LENGTH_SHORT
+        ).show()
+        if (!overlayOn) subtitleOverlay.hide()
     }
 
     private fun injectAutoShow() {
@@ -248,9 +227,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                   return acc;
                 }
                 var vids = collect(document, []);
-                if (vids.length === 0) {
-                  return JSON.stringify({totalVideos: 0});
-                }
+                if (vids.length === 0) return JSON.stringify({totalVideos: 0});
                 var best = null, maxArea = 0;
                 for (var i = 0; i < vids.length; i++) {
                   try {
@@ -273,13 +250,9 @@ class SariSubtitleActivity : AppCompatActivity() {
                   currentTime: Number.isFinite(t) ? t : 0,
                   duration: Number.isFinite(d) ? d : 0,
                   paused: !!best.paused,
-                  readyState: best.readyState,
-                  videoWidth: best.videoWidth,
-                  videoHeight: best.videoHeight
+                  readyState: best.readyState
                 });
-              } catch(e) {
-                return JSON.stringify({error: String(e)});
-              }
+              } catch(e) { return JSON.stringify({error: String(e)}); }
             })();
         """.trimIndent()
 
@@ -308,17 +281,11 @@ class SariSubtitleActivity : AppCompatActivity() {
             val p = o.optBoolean("paused", false)
             val r = o.optInt("readyState", 0)
 
-            // ⚡ ابحث عن cue مناسب
-            val tMs = (t * 1000).toLong()
-            val cue = repo.findCueAt(tMs)
+            val cue = repo.findCueAt((t * 1000).toLong())
 
-            // ⚡ اعرض في Overlay
             if (overlayOn && !repo.isEmpty) {
-                if (cue != null) {
-                    subtitleOverlay.show(cue.text)
-                } else {
-                    subtitleOverlay.hide()
-                }
+                if (cue != null) subtitleOverlay.show(cue.text)
+                else subtitleOverlay.hide()
             } else if (!overlayOn) {
                 subtitleOverlay.hide()
             }
@@ -326,11 +293,8 @@ class SariSubtitleActivity : AppCompatActivity() {
             val pos = formatSec(t)
             val dur = formatSec(d)
             val state = if (p) "⏸" else "▶"
-            val srtInfo = if (repo.isEmpty) {
-                "SRT: —"
-            } else {
-                "SRT: ${repo.size} سطر" + (if (cue != null) " → #${cue.index}" else " → —")
-            }
+            val srtInfo = if (repo.isEmpty) "SRT: —"
+            else "SRT: ${repo.size} → #${cue?.index ?: "—"}"
 
             statusText.text = "video: $pos / $dur  $state  rs=$r\n" +
                 "$srtInfo  ov=${if (overlayOn) "ON" else "OFF"}\n" +
