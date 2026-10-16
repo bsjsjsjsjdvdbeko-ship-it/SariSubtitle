@@ -19,14 +19,15 @@ import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONObject
 
 /**
- * Sari Subtitle — المرحلة 3.1
- * - إعدادات المظهر (حجم، لون، موضع، خلفية).
- * - حفظ تلقائي في SharedPreferences.
+ * Sari Subtitle — المرحلة 3.2
+ * - تصحيح المزامنة (+/- 0.5s) + تصفير.
+ * - حفظ الإزاحة تلقائياً.
  */
 class SariSubtitleActivity : AppCompatActivity() {
 
     companion object {
         private const val REQ_PICK_SRT = 1001
+        private const val OFFSET_STEP_MS = 500L
     }
 
     private lateinit var urlInput: EditText
@@ -46,13 +47,13 @@ class SariSubtitleActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         settings = SubtitleSettings(this)
+        repo.offsetMs = settings.offsetMs
 
         urlInput = findViewById(R.id.urlInput)
         statusText = findViewById(R.id.statusText)
         webView = findViewById(R.id.webView)
         subtitleOverlay = findViewById(R.id.subtitleOverlay)
 
-        // طبق الإعدادات المحفوظة فوراً
         subtitleOverlay.applySettings(settings)
 
         webView.settings.apply {
@@ -71,7 +72,6 @@ class SariSubtitleActivity : AppCompatActivity() {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                statusText.text = "تم التحميل: $url"
                 injectAutoShow()
             }
         }
@@ -79,9 +79,7 @@ class SariSubtitleActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.loadButton).setOnClickListener {
             val url = urlInput.text.toString().trim()
-            if (url.isEmpty()) return@setOnClickListener
-            statusText.text = getString(R.string.status_loading)
-            webView.loadUrl(url)
+            if (url.isNotEmpty()) webView.loadUrl(url)
         }
 
         findViewById<Button>(R.id.reloadXButton).setOnClickListener {
@@ -107,8 +105,40 @@ class SariSubtitleActivity : AppCompatActivity() {
             }
         }
 
+        // ⚡ أزرار المزامنة
+        findViewById<Button>(R.id.offsetMinusButton).setOnClickListener {
+            changeOffset(-OFFSET_STEP_MS)
+        }
+        findViewById<Button>(R.id.offsetPlusButton).setOnClickListener {
+            changeOffset(+OFFSET_STEP_MS)
+        }
+        findViewById<Button>(R.id.offsetResetButton).setOnClickListener {
+            repo.offsetMs = 0L
+            settings.offsetMs = 0L
+            Toast.makeText(this, "الإزاحة: 0.0s", Toast.LENGTH_SHORT).show()
+            pollCurrentTimeOnce()
+        }
+
         startPolling()
         webView.loadUrl("https://x.com/")
+    }
+
+    /**
+     * تعديل الإزاحة.
+     */
+    private fun changeOffset(deltaMs: Long) {
+        if (repo.isEmpty) {
+            Toast.makeText(this, "حمّل SRT أولاً", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val newOffset = (repo.offsetMs + deltaMs).coerceIn(-30000L, 30000L)
+        repo.offsetMs = newOffset
+        settings.offsetMs = newOffset
+
+        val sign = if (newOffset >= 0) "+" else ""
+        val secStr = "%.1f".format(newOffset / 1000.0)
+        Toast.makeText(this, "الإزاحة: $sign${secStr}s", Toast.LENGTH_SHORT).show()
+        pollCurrentTimeOnce()
     }
 
     private fun openSrtPicker() {
@@ -296,8 +326,11 @@ class SariSubtitleActivity : AppCompatActivity() {
             val srtInfo = if (repo.isEmpty) "SRT: —"
             else "SRT: ${repo.size} → #${cue?.index ?: "—"}"
 
+            val offSign = if (repo.offsetMs >= 0) "+" else ""
+            val offStr = "$offSign${"%.1f".format(repo.offsetMs / 1000.0)}s"
+
             statusText.text = "video: $pos / $dur  $state  rs=$r\n" +
-                "$srtInfo  ov=${if (overlayOn) "ON" else "OFF"}\n" +
+                "$srtInfo  ov=${if (overlayOn) "ON" else "OFF"}  ⏱ $offStr\n" +
                 "t=${"%.2f".format(t)}s  tick=${System.currentTimeMillis() % 100000}"
         } catch (e: Exception) {
             statusText.text = "تعذر التحليل: ${e.message}"

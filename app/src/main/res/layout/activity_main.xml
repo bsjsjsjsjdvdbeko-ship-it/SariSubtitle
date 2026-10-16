@@ -9,7 +9,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="6dp">
+        android:padding="4dp">
 
         <EditText
             android:id="@+id/urlInput"
@@ -30,11 +30,12 @@
             android:text="@string/btn_load" />
     </LinearLayout>
 
+    <!-- الصف 1: الأزرار الأساسية -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="6dp">
+        android:padding="4dp">
 
         <Button
             android:id="@+id/checkTimeButton"
@@ -76,15 +77,58 @@
             android:text="@string/btn_reload_x" />
     </LinearLayout>
 
+    <!-- الصف 2: أزرار المزامنة -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="4dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="مزامنة:"
+            android:textColor="#00FF88"
+            android:textSize="11sp"
+            android:paddingEnd="4dp"
+            android:paddingStart="4dp"
+            android:gravity="center_vertical" />
+
+        <Button
+            android:id="@+id/offsetMinusButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="12sp"
+            android:text="➖ 0.5s" />
+
+        <Button
+            android:id="@+id/offsetPlusButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="12sp"
+            android:text="➕ 0.5s" />
+
+        <Button
+            android:id="@+id/offsetResetButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="12sp"
+            android:text="تصفير" />
+
+    </LinearLayout>
+
     <TextView
         android:id="@+id/statusText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:padding="6dp"
+        android:padding="4dp"
         android:fontFamily="monospace"
         android:textSize="10sp"
         android:textColor="#00FF88"
-        android:maxLines="5"
+        android:maxLines="6"
         android:text="@string/status_ready" />
 
     <FrameLayout

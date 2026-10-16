@@ -1,61 +1,45 @@
 package com.sari.subtitle.v2
 
 /**
- * يدير قائمة cues ويوفّر بحثاً سريعاً حسب الوقت.
+ * يدير قائمة cues + الإزاحة الزمنية + البحث.
  */
 class SubtitleRepository {
 
     private var cues: List<SubtitleCue> = emptyList()
 
+    /** الإزاحة بالمللي ثانية (تُضاف لوقت الفيديو) */
+    var offsetMs: Long = 0L
+
     val size: Int get() = cues.size
     val isEmpty: Boolean get() = cues.isEmpty()
 
-    /**
-     * يستبدل القائمة الحالية.
-     */
     fun setCues(newCues: List<SubtitleCue>) {
         cues = newCues.sortedBy { it.startMs }
     }
 
     fun clear() {
         cues = emptyList()
+        offsetMs = 0L
     }
 
     /**
-     * يعيد cue المناسب للوقت المحدد (ms)، أو null.
-     * يستخدم بحثاً ثنائياً.
+     * يبحث عن cue عند وقت الفيديو + الإزاحة.
      */
-    fun findCueAt(timeMs: Long): SubtitleCue? {
+    fun findCueAt(videoMs: Long): SubtitleCue? {
         if (cues.isEmpty()) return null
+        val timeMs = videoMs + offsetMs
 
         var lo = 0
         var hi = cues.size - 1
-        var candidate: SubtitleCue? = null
-
         while (lo <= hi) {
             val mid = (lo + hi) / 2
             val c = cues[mid]
             when {
                 timeMs < c.startMs -> hi = mid - 1
                 timeMs >= c.endMs -> lo = mid + 1
-                else -> return c  // داخل النطاق
+                else -> return c
             }
-            if (c.startMs <= timeMs) candidate = c
         }
-        return candidate?.takeIf { it.contains(timeMs) }
-    }
-
-    /**
-     * يعيد cue واحد قريب من الوقت (للتشخيص).
-     */
-    fun debugNearest(timeMs: Long): SubtitleCue? {
-        if (cues.isEmpty()) return null
-        var best = cues[0]
-        var bestDist = kotlin.math.abs(cues[0].startMs - timeMs)
-        for (c in cues) {
-            val d = kotlin.math.abs(c.startMs - timeMs)
-            if (d < bestDist) { bestDist = d; best = c }
-        }
-        return best
+        return null
     }
 }

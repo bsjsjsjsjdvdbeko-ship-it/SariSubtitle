@@ -5,8 +5,7 @@ import android.content.SharedPreferences
 import android.graphics.Color
 
 /**
- * إعدادات عرض الترجمة.
- * تُحفظ تلقائياً في SharedPreferences.
+ * إعدادات عرض الترجمة + الإزاحة الزمنية.
  */
 class SubtitleSettings(context: Context) {
 
@@ -17,33 +16,30 @@ class SubtitleSettings(context: Context) {
         private const val KEY_TEXT_COLOR = "text_color"
         private const val KEY_BG_COLOR = "bg_color"
         private const val KEY_BOLD = "bold"
+        private const val KEY_OFFSET = "offset_ms"
 
-        // أحجام الخط (بالـ sp)
         val TEXT_SIZES = floatArrayOf(14f, 18f, 22f, 28f, 34f)
         val TEXT_SIZE_LABELS = arrayOf("صغير", "متوسط", "كبير", "كبير جداً", "ضخم")
 
-        // المواضع
         const val POS_BOTTOM = 0
         const val POS_CENTER = 1
         const val POS_TOP = 2
         val POSITION_LABELS = arrayOf("أسفل", "وسط", "أعلى")
 
-        // ألوان النص
         val TEXT_COLORS = intArrayOf(
             Color.WHITE,
             Color.YELLOW,
             Color.CYAN,
             Color.GREEN,
-            0xFFFFA500.toInt()  // برتقالي
+            0xFFFFA500.toInt()
         )
         val TEXT_COLOR_LABELS = arrayOf("أبيض", "أصفر", "سماوي", "أخضر", "برتقالي")
 
-        // ألوان الخلفية (مع شفافية)
         val BG_COLORS = intArrayOf(
-            Color.argb(180, 0, 0, 0),     // أسود شبه شفاف
-            Color.argb(120, 0, 0, 0),     // أسود خفيف
-            Color.TRANSPARENT,             // شفاف
-            Color.argb(180, 0, 0, 80)     // أزرق داكن
+            Color.argb(180, 0, 0, 0),
+            Color.argb(120, 0, 0, 0),
+            Color.TRANSPARENT,
+            Color.argb(180, 0, 0, 80)
         )
         val BG_COLOR_LABELS = arrayOf("أسود قوي", "أسود خفيف", "شفاف", "أزرق")
     }
@@ -52,7 +48,7 @@ class SubtitleSettings(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     var textSizeIndex: Int
-        get() = prefs.getInt(KEY_TEXT_SIZE, 2)  // كبير افتراضياً
+        get() = prefs.getInt(KEY_TEXT_SIZE, 2)
         set(v) = prefs.edit().putInt(KEY_TEXT_SIZE, v).apply()
 
     var position: Int
@@ -70,6 +66,11 @@ class SubtitleSettings(context: Context) {
     var bold: Boolean
         get() = prefs.getBoolean(KEY_BOLD, true)
         set(v) = prefs.edit().putBoolean(KEY_BOLD, v).apply()
+
+    /** إزاحة SRT بالمللي ثانية */
+    var offsetMs: Long
+        get() = prefs.getLong(KEY_OFFSET, 0L)
+        set(v) = prefs.edit().putLong(KEY_OFFSET, v).apply()
 
     val textSize: Float get() = TEXT_SIZES[textSizeIndex.coerceIn(0, TEXT_SIZES.size - 1)]
     val textColor: Int get() = TEXT_COLORS[textColorIndex.coerceIn(0, TEXT_COLORS.size - 1)]
