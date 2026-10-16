@@ -19,9 +19,10 @@ import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONObject
 
 /**
- * Sari Subtitle — المرحلة 3.2
- * - تصحيح المزامنة (+/- 0.5s) + تصفير.
- * - حفظ الإزاحة تلقائياً.
+ * Sari Subtitle — المرحلة 3.3
+ * - حفظ SRT تلقائياً بعد تحميله (مربوط بـ URL).
+ * - استرجاع SRT عند فتح نفس URL.
+ * - عرض عدد الملفات المحفوظة.
  */
 class SariSubtitleActivity : AppCompatActivity() {
 
@@ -36,10 +37,18 @@ class SariSubtitleActivity : AppCompatActivity() {
     private lateinit var subtitleOverlay: SubtitleOverlay
 
     private lateinit var settings: SubtitleSettings
+    private lateinit var storage: SrtStorage
+
     private val handler = Handler(Looper.getMainLooper())
     private val repo = SubtitleRepository()
     private var polling = false
     private var overlayOn = false
+
+    /** آخر SRT نصي محمّل (للحفظ عند الحاجة) */
+    private var lastSrtText: String? = null
+
+    /** URL الذي تم تحميل SRT من أجله */
+    private var lastSrtUrl: String? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,6 +56,7 @@ class SariSubtitleActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         settings = SubtitleSettings(this)
+        storage = SrtStorage(this)
         repo.offsetMs = settings.offsetMs
 
         urlInput = findViewById(R.id.urlInput)
@@ -73,6 +83,8 @@ class SariSubtitleActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 injectAutoShow()
+                // ⚡ محاولة استرجاع SRT لهذا URL
+                if (url != null) tryAutoLoadSrt(url)
             }
         }
         webView.webChromeClient = WebChromeClient()
@@ -105,7 +117,6 @@ class SariSubtitleActivity : AppCompatActivity() {
             }
         }
 
-        // ⚡ أزرار المزامنة
         findViewById<Button>(R.id.offsetMinusButton).setOnClickListener {
             changeOffset(-OFFSET_STEP_MS)
         }
@@ -121,6 +132,28 @@ class SariSubtitleActivity : AppCompatActivity() {
 
         startPolling()
         webView.loadUrl("https://x.com/")
+    }
+
+    /**
+     * عند فتح URL جديد — إن كان له SRT محفوظ، حمّله تلقائياً.
+     */
+    private fun tryAutoLoadSrt(url: String) {
+        if (lastSrtUrl == url) return
+        if (!storage.has(url)) return
+        try {
+            val srtText = storage.load(url) ?: return
+            val cues = SrtParser.parse(srtText.byteInputStream())
+            if (cues.isEmpty()) return
+            repo.setCues(cues)
+            lastSrtText = srtText
+            lastSrtUrl = url
+            if (!overlayOn) overlayOn = true
+            runOnUiThread {
+                Toast.makeText(this, "✅ SRT محفوظ: ${cues.size} سطر", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            // تجاهل
+        }
     }
 
     /**
@@ -170,14 +203,25 @@ class SariSubtitleActivity : AppCompatActivity() {
                 Toast.makeText(this, "تعذّر فتح الملف", Toast.LENGTH_SHORT).show()
                 return
             }
-            val cues = input.use { SrtParser.parse(it) }
+            val srtText = input.use { it.readBytes().toString(Charsets.UTF_8) }
+            val cues = SrtParser.parse(srtText.byteInputStream())
             if (cues.isEmpty()) {
                 Toast.makeText(this, "لا ترجمات في الملف", Toast.LENGTH_LONG).show()
                 return
             }
             repo.setCues(cues)
-            Toast.makeText(this, "✅ تم تحميل ${cues.size} سطر", Toast.LENGTH_SHORT).show()
+            lastSrtText = srtText
             if (!overlayOn) overlayOn = true
+
+            // ⚡ احفظ مرتبطاً بـ URL الحالي
+            val currentUrl = webView.url ?: urlInput.text.toString().trim()
+            if (currentUrl.isNotEmpty() && currentUrl.startsWith("http")) {
+                storage.save(currentUrl, srtText, cues.size)
+                lastSrtUrl = currentUrl
+                Toast.makeText(this, "✅ تم تحميل ${cues.size} سطر + حفظ", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "✅ تم تحميل ${cues.size} سطر", Toast.LENGTH_SHORT).show()
+            }
         } catch (e: Exception) {
             Toast.makeText(this, "خطأ: ${e.message}", Toast.LENGTH_LONG).show()
         }
@@ -329,9 +373,11 @@ class SariSubtitleActivity : AppCompatActivity() {
             val offSign = if (repo.offsetMs >= 0) "+" else ""
             val offStr = "$offSign${"%.1f".format(repo.offsetMs / 1000.0)}s"
 
+            val savedInfo = "💾 ${storage.count()}"
+
             statusText.text = "video: $pos / $dur  $state  rs=$r\n" +
                 "$srtInfo  ov=${if (overlayOn) "ON" else "OFF"}  ⏱ $offStr\n" +
-                "t=${"%.2f".format(t)}s  tick=${System.currentTimeMillis() % 100000}"
+                "t=${"%.2f".format(t)}s  $savedInfo  tick=${System.currentTimeMillis() % 100000}"
         } catch (e: Exception) {
             statusText.text = "تعذر التحليل: ${e.message}"
         }
