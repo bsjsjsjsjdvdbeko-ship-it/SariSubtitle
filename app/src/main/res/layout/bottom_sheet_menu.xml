@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="ماذا تريد أن تفعل؟"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="?android:attr/textColorPrimary"
+            android:gravity="center"
+            android:padding="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="اختر وظيفة واحدة. إذا كانت ترجمة الفيديو محفوظة، سيحمّلها التطبيق دون إعادة التفريغ."
+            android:textSize="13sp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:paddingBottom="12dp" />
+
+        <Button
+            android:id="@+id/bsGenerateSrtButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🎬 إنشاء / استعادة SRT من رابط" />
+
+        <Button
+            android:id="@+id/bsTranscribeAudioButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🎙️ تفريغ ملف صوت أو MP3" />
+
+        <Button
+            android:id="@+id/bsImportSrtButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📂 فتح ملف ترجمة SRT" />
+
+        <Button
+            android:id="@+id/bsTranslateSrtButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🌐 ترجمة ملف SRT" />
+
+        <Button
+            android:id="@+id/bsOpenChromeDownloaderButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📥 تنزيل صوت من رابط فيديو" />
+
+        <Button
+            android:id="@+id/bsCopyLinkButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="📋 نسخ الرابط الحالي" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="?android:attr/listDivider"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="ضبط مزامنة الترجمة"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="?android:attr/textColorSecondary"
+            android:padding="4dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/bsOffsetMinus"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="− 0.5 ث" />
+
+            <Button
+                android:id="@+id/bsOffsetPlus"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="+ 0.5 ث" />
+
+            <Button
+                android:id="@+id/bsOffsetReset"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="تصفير" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

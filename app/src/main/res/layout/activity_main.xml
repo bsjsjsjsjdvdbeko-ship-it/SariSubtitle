@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black"
+    android:fitsSystemWindows="true">
+
+    <!-- WebView كامل (95% من الشاشة) -->
+    <WebView
+        android:id="@+id/webView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_above="@+id/bottomBar"
+        android:layout_below="@+id/topBar" />
+
+    <!-- SubtitleOverlay فوق WebView -->
+    <FrameLayout
+        android:id="@+id/webContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_above="@+id/bottomBar"
+        android:layout_below="@+id/topBar">
+
+        <com.sari.subtitle.v2.SubtitleOverlay
+            android:id="@+id/subtitleOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+    </FrameLayout>
+
+    <!-- الشريط العلوي (رفيع) -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:orientation="horizontal"
+        android:padding="4dp"
+        android:background="#1A1A1A">
+
+        <EditText
+            android:id="@+id/urlInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="@string/hint_url"
+            android:inputType="textUri"
+            android:singleLine="true"
+            android:textSize="12sp"
+            android:textColor="@android:color/white"
+            android:textColorHint="#888888"
+            android:text="https://x.com/" />
+
+        <Button
+            android:id="@+id/loadButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="11sp"
+            android:text="فتح" />
+
+        <Button
+            android:id="@+id/settingsButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="14sp"
+            android:text="⚙️" />
+
+    </LinearLayout>
+
+    <!-- شريط الحالة (شفاف) -->
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_above="@+id/bottomBar"
+        android:padding="6dp"
+        android:fontFamily="monospace"
+        android:textSize="10sp"
+        android:textColor="#00FF88"
+        android:maxLines="3"
+        android:background="#80000000"
+        android:visibility="gone"
+        android:text="@string/status_ready" />
+
+    <!-- الشريط السفلي (4 أزرار فقط) -->
+    <LinearLayout
+        android:id="@+id/bottomBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:orientation="horizontal"
+        android:padding="4dp"
+        android:paddingBottom="24dp"
+        android:background="#1A1A1A">
+
+        <Button
+            android:id="@+id/menuButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="18sp"
+            android:text="☰" />
+
+        <Button
+            android:id="@+id/toggleOverlayButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="11sp"
+            android:text="ترجمة" />
+
+        <Button
+            android:id="@+id/loadSrtButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="11sp"
+            android:text="SRT" />
+
+        <Button
+            android:id="@+id/savedItemsButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="11sp"
+            android:text="محفوظاتي" />
+
+    </LinearLayout>
+
+    <!-- أزرار مخفية للاستخدام القديم (مخفية) -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone">
+
+        <Button android:id="@+id/transcribeXAutoButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:id="@+id/testCaptureButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:id="@+id/transcribeAudioButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:id="@+id/transcribeDirectMediaUrlButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:id="@+id/importSrtFromUrlButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:id="@+id/analyzeLinkButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:id="@+id/generateSrtFromLinkButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:id="@+id/pasteLinkTranscribeButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:id="@+id/copyLinkOnlyButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:id="@+id/translateSrtButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:id="@+id/offsetMinusButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:id="@+id/offsetPlusButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:id="@+id/offsetResetButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:id="@+id/checkTimeButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:id="@+id/reloadXButton" android:layout_width="1dp" android:layout_height="1dp" />
+
+    </LinearLayout>
+
+</RelativeLayout>
