@@ -2142,10 +2142,4 @@ private fun openAudioPicker() {
         webView.destroy()
         super.onDestroy()
     }
-    private lateinit var bsOneTapArabicButton: android.view.View
-    private lateinit var bsTranscribeXButton: android.view.View
-    private lateinit var bsOpenDownloaderButton: android.view.View
-    private lateinit var bsDirectMediaButton: android.view.View
-    private lateinit var bsAnalyzeLinkButton: android.view.View
-    private lateinit var bsPasteSubWhisperButton: android.view.View
 }

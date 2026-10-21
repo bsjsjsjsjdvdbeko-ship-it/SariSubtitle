@@ -31,10 +31,22 @@
             android:paddingBottom="12dp" />
 
         <Button
+            android:id="@+id/bsOneTapArabicButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="⚡ ترجمة عربية بنقرة واحدة" />
+
+        <Button
             android:id="@+id/bsGenerateSrtButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="🎬 إنشاء / استعادة SRT من رابط" />
+
+        <Button
+            android:id="@+id/bsTranscribeXButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🎙️ تفريغ فيديو من X" />
 
         <Button
             android:id="@+id/bsTranscribeAudioButton"
@@ -53,6 +65,30 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="🌐 ترجمة ملف SRT" />
+
+        <Button
+            android:id="@+id/bsDirectMediaButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🔗 تفريغ رابط صوت أو فيديو مباشر" />
+
+        <Button
+            android:id="@+id/bsAnalyzeLinkButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🔍 تحليل الرابط الحالي" />
+
+        <Button
+            android:id="@+id/bsPasteSubWhisperButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🌐 تفريغ الرابط عبر SubWhisper" />
+
+        <Button
+            android:id="@+id/bsOpenDownloaderButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="⬇️ فتح أداة تنزيل فيديو X" />
 
         <Button
             android:id="@+id/bsOpenChromeDownloaderButton"
