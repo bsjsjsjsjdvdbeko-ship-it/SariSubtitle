@@ -1304,11 +1304,12 @@ class SariSubtitleActivity : AppCompatActivity() {
                         val detectedLang = result.language.lowercase().take(2)
                         val isArabic = detectedLang == "ar"
                         val deepLKey = settings.deepLApiKey
-                        val useDeepL = deepLKey.isNotBlank()
+                        val useGemini = settings.geminiApiKey.isNotBlank()
+                        val useDeepL = !useGemini && deepLKey.isNotBlank()
                         
                         if (!isArabic && detectedLang.isNotBlank() && detectedLang != "au") {
-                            // ترجم
-                            val provider = if (useDeepL) "DeepL" else "MyMemory"
+                            // Gemini أولاً للترجمة النصية إذا كان مفتاحه محفوظاً، ثم DeepL/Google/MyMemory.
+                            val provider = when { useGemini -> "Gemini"; useDeepL -> "DeepL"; else -> "Google/MyMemory" }
                             val progress2 = android.app.ProgressDialog(this).apply {
                                 setTitle("🌐 ترجمة → العربية ($provider)")
                                 setMessage("جارٍ الترجمة…")
@@ -1320,7 +1321,19 @@ class SariSubtitleActivity : AppCompatActivity() {
                             
                             Thread {
                                 try {
-                                    val translatedSrt = if (useDeepL) {
+                                    val translatedSrt = if (useGemini) {
+                                        SrtTranslationService.translateSrt(
+                                            source = result.srt,
+                                            sourceLang = detectedLang,
+                                            targetLang = "ar",
+                                            context = applicationContext
+                                        ) { done, total ->
+                                            runOnUiThread {
+                                                progress2.progress = if (total > 0) (done * 100 / total) else 100
+                                                progress2.setMessage("$provider: $done / $total")
+                                            }
+                                        }
+                                    } else if (useDeepL) {
                                         DeepLTranslationService.translateSrt(
                                             source = result.srt,
                                             sourceLang = detectedLang,
@@ -1341,7 +1354,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                                         ) { done, total ->
                                             runOnUiThread {
                                                 progress2.progress = (done * 100 / total)
-                                                progress2.setMessage("MyMemory: $done / $total")
+                                                progress2.setMessage("$provider: $done / $total")
                                             }
                                         }
                                     }
@@ -1421,6 +1434,7 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         return when (settings.sttProvider) {
             SubtitleSettings.STT_LOCAL -> hasLocalModel
             SubtitleSettings.STT_OPENAI -> settings.openAiApiKey.isNotBlank() || hasLocalModel
+            SubtitleSettings.STT_AUTO -> settings.groqApiKey.isNotBlank() || settings.deepgramApiKey.isNotBlank() || hasLocalModel
             SubtitleSettings.STT_DEEPGRAM -> settings.deepgramApiKey.isNotBlank() || settings.groqApiKey.isNotBlank() || hasLocalModel
             else -> settings.groqApiKey.isNotBlank() || settings.deepgramApiKey.isNotBlank() || hasLocalModel
         }
@@ -1454,6 +1468,8 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
             VoskModelManager.isInstalled(applicationContext, VoskModelManager.ENGLISH)
         val cloudProviders = when (selected) {
             SubtitleSettings.STT_LOCAL -> emptyList()
+            // الوضع التلقائي لا يرسل الصوت إلى مزود قد يتطلب دفعاً؛ يجرب Groq ثم Deepgram.
+            SubtitleSettings.STT_AUTO -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
             SubtitleSettings.STT_DEEPGRAM -> listOf(SubtitleSettings.STT_DEEPGRAM, SubtitleSettings.STT_GROQ)
             SubtitleSettings.STT_GROQ -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
             else -> listOf(SubtitleSettings.STT_OPENAI)
@@ -1466,7 +1482,10 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
             else cloudProviders + if (hasLocalModel) listOf(SubtitleSettings.STT_LOCAL) else emptyList()
 
         if (providers.isEmpty()) {
-            throw IllegalStateException("لا يوجد مزود تفريغ جاهز. أضف مفتاح Groq أو Deepgram، أو نزّل نموذج Vosk المحلي من الإعدادات.")
+            val message = if (selected == SubtitleSettings.STT_AUTO)
+                "لا يوجد مزود جاهز للوضع التلقائي. أضف مفتاح Groq أو Deepgram، أو نزّل نموذج Vosk المحلي من الإعدادات. لن يُستخدم OpenAI تلقائياً لأنه قد يتطلب دفعاً."
+            else "لا يوجد مزود تفريغ جاهز. أضف مفتاح المزود المختار أو نزّل نموذج Vosk المحلي من الإعدادات."
+            throw IllegalStateException(message)
         }
         val failures = mutableListOf<String>()
         for (provider in providers.distinct()) {
@@ -1479,10 +1498,13 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                         SubtitleSettings.STT_LOCAL -> "Vosk المحلي دون إنترنت"
                         else -> "Groq"
                     }
+                    val notice = when {
+                        selected == SubtitleSettings.STT_AUTO -> "الوضع التلقائي اختار $label لإنشاء الترجمة."
+                        provider == SubtitleSettings.STT_LOCAL -> "تعذرت الخدمات السحابية؛ تم التحويل إلى التفريغ المحلي المجاني."
+                        else -> "تعذر المزود المختار؛ نجح البديل $label."
+                    }
                     runOnUiThread {
-                        if (!isFinishing) Toast.makeText(this,
-                            if (provider == SubtitleSettings.STT_LOCAL) "تعذرت الخدمات السحابية؛ تم التحويل إلى التفريغ المحلي المجاني." else "تعذر المزود المختار؛ نجح البديل $label.",
-                            Toast.LENGTH_LONG).show()
+                        if (!isFinishing) Toast.makeText(this, notice, Toast.LENGTH_LONG).show()
                     }
                 }
                 return result

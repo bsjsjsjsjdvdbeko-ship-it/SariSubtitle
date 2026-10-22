@@ -71,35 +71,64 @@ object SrtTranslationService {
             "الملف لا يبدو بصيغة SRT صحيحة"
         }
 
-        // Cache persistent across runs: repeated subtitle lines do not consume API calls again.
+        // Keep every original block/timestamp intact; only replace the text lines.
+        data class CueWork(val blockIndex: Int, val lines: MutableList<String>, val timeIndex: Int,
+                           val text: String, val cacheKey: String)
         val memoryCache = mutableMapOf<String, String>()
-        val output = ArrayList<String>(blocks.size)
-        val translatable = blocks.count { block ->
+        val output = blocks.toMutableList()
+        val pending = mutableListOf<CueWork>()
+        val total = blocks.count { block ->
             val lines = block.split('\n')
             val ti = lines.indexOfFirst { timestampPattern.containsMatchIn(it) }
             ti >= 0 && lines.drop(ti + 1).any { it.isNotBlank() }
         }
-
         var completed = 0
-        for (block in blocks) {
+        val settings = context?.let { SubtitleSettings(it) }
+        val geminiKey = settings?.geminiApiKey.orEmpty()
+        var geminiAvailable = geminiKey.isNotBlank()
+
+        for ((index, block) in blocks.withIndex()) {
             val lines = block.split('\n').toMutableList()
             val timeIndex = lines.indexOfFirst { timestampPattern.containsMatchIn(it) }
-            if (timeIndex < 0 || lines.drop(timeIndex + 1).all { it.isBlank() }) {
-                output.add(block)
-                continue
-            }
+            if (timeIndex < 0 || lines.drop(timeIndex + 1).all { it.isBlank() }) continue
             val text = lines.drop(timeIndex + 1).joinToString("\n").trim()
             val key = cacheKey(text, sourceLang, targetLang)
-            val translated = memoryCache[text] ?: readPersistentCache(context, key)
-                ?: translateText(text, sourceLang, targetLang).also {
-                    memoryCache[text] = it
-                    writePersistentCache(context, key, it)
+            val cached = memoryCache[text] ?: readPersistentCache(context, key)
+            if (!cached.isNullOrBlank()) {
+                while (lines.size > timeIndex + 1) lines.removeAt(lines.lastIndex)
+                lines.add(cached)
+                output[index] = lines.joinToString("\n")
+                memoryCache[text] = cached
+                completed++
+                onProgress(completed, total)
+            } else {
+                pending.add(CueWork(index, lines, timeIndex, text, key))
+            }
+        }
+
+        // Gemini receives up to eight subtitle texts per request to reduce API calls on long files.
+        for (batch in pending.chunked(8)) {
+            val geminiResults = if (geminiAvailable) {
+                try {
+                    GeminiTranslationService.translateBatch(batch.map { it.text }, sourceLang, targetLang, geminiKey)
+                } catch (_: Exception) {
+                    // Avoid repeatedly hitting an exhausted/invalid Gemini quota for every cue.
+                    geminiAvailable = false
+                    null
                 }
-            while (lines.size > timeIndex + 1) lines.removeAt(lines.lastIndex)
-            lines.add(translated)
-            output.add(lines.joinToString("\n"))
-            completed++
-            onProgress(completed, translatable)
+            } else null
+
+            for ((batchIndex, cue) in batch.withIndex()) {
+                val translated = geminiResults?.getOrNull(batchIndex)?.takeIf { it.isNotBlank() }
+                    ?: translateText(cue.text, sourceLang, targetLang, settings)
+                while (cue.lines.size > cue.timeIndex + 1) cue.lines.removeAt(cue.lines.lastIndex)
+                cue.lines.add(translated)
+                output[cue.blockIndex] = cue.lines.joinToString("\n")
+                memoryCache[cue.text] = translated
+                writePersistentCache(context, cue.cacheKey, translated)
+                completed++
+                onProgress(completed, total)
+            }
         }
         return output.joinToString("\r\n\r\n") + "\r\n"
     }
@@ -132,7 +161,7 @@ object SrtTranslationService {
     private fun readPersistentCache(context: Context?, key: String): String? {
         if (context == null) return null
         return try {
-            context.getSharedPreferences("srt_translation_cache_v1", Context.MODE_PRIVATE)
+            context.getSharedPreferences("srt_translation_cache_v2", Context.MODE_PRIVATE)
                 .getString(key, null)?.takeIf { it.isNotBlank() }
         } catch (_: Exception) { null }
     }
@@ -140,30 +169,26 @@ object SrtTranslationService {
     private fun writePersistentCache(context: Context?, key: String, value: String) {
         if (context == null || value.isBlank()) return
         try {
-            context.getSharedPreferences("srt_translation_cache_v1", Context.MODE_PRIVATE)
+            context.getSharedPreferences("srt_translation_cache_v2", Context.MODE_PRIVATE)
                 .edit().putString(key, value).apply()
         } catch (_: Exception) { /* Cache failures must not fail translation. */ }
     }
 
-    private fun translateText(text: String, sourceLang: String, targetLang: String): String {
+    private fun translateText(text: String, sourceLang: String, targetLang: String, settings: SubtitleSettings?): String {
         if (text.isBlank()) return text
-        if (text.length > 450) {
-            throw IllegalArgumentException("أحد مقاطع الترجمة طويل جداً؛ قصّره أو قسّمه")
-        }
-
+        if (text.length > 450) throw IllegalArgumentException("أحد مقاطع الترجمة طويل جداً؛ قصّره أو قسّمه")
         var attempt = 0
         while (true) {
             try {
-                return translateTextOnce(text, sourceLang, targetLang)
+                return DeepLTranslationService.translateTextOnly(
+                    text, sourceLang, targetLang, settings?.deepLApiKey.orEmpty()
+                )
             } catch (e: Exception) {
                 attempt++
                 val message = e.message.orEmpty()
-                val retryable = e is IOException ||
-                    Regex("HTTP (429|5\\d\\d)", RegexOption.IGNORE_CASE).containsMatchIn(message)
-                if (!retryable || attempt >= 3) throw e
-                try {
-                    Thread.sleep(700L * attempt)
-                } catch (interrupted: InterruptedException) {
+                val retryable = e is IOException || Regex("HTTP (429|5\\d\\d)", RegexOption.IGNORE_CASE).containsMatchIn(message)
+                if (!retryable || attempt >= 2) throw e
+                try { Thread.sleep(500L * attempt) } catch (interrupted: InterruptedException) {
                     Thread.currentThread().interrupt()
                     throw IOException("تم إيقاف انتظار إعادة محاولة الترجمة", interrupted)
                 }

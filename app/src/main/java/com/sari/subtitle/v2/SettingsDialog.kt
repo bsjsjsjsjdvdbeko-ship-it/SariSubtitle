@@ -95,14 +95,27 @@ object SettingsDialog {
 
         // مزود تحويل الصوت إلى نص (STT)
         root.addView(makeLabel(context, "مزود تحويل الصوت إلى نص (STT)"))
-        val providerNames = arrayOf("Groq Whisper", "Deepgram Nova-3", "OpenAI Whisper", "Vosk محلي دون إنترنت")
+        val providerNames = arrayOf(
+            "تلقائي — المجاني أولاً (موصى به)",
+            "Groq Whisper",
+            "Deepgram Nova-3",
+            "OpenAI Whisper (قد يتطلب دفعاً)",
+            "Vosk محلي دون إنترنت"
+        )
         val providerSpinner = android.widget.Spinner(context).apply {
             adapter = android.widget.ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, providerNames)
-            setSelection(when (settings.sttProvider) { SubtitleSettings.STT_DEEPGRAM -> 1; SubtitleSettings.STT_OPENAI -> 2; SubtitleSettings.STT_LOCAL -> 3; else -> 0 })
+            setSelection(when (settings.sttProvider) {
+                SubtitleSettings.STT_AUTO -> 0
+                SubtitleSettings.STT_GROQ -> 1
+                SubtitleSettings.STT_DEEPGRAM -> 2
+                SubtitleSettings.STT_OPENAI -> 3
+                SubtitleSettings.STT_LOCAL -> 4
+                else -> 1
+            })
         }
         root.addView(providerSpinner)
         root.addView(TextView(context).apply {
-            text = "اختر خدمة سحابية أو Vosk المحلي. بعد تنزيل النموذج مرة واحدة، يعمل Vosk دون إنترنت ودون مفتاح API. نموذج العربية حجمه نحو 318MB والإنجليزية نحو 40MB؛ نزّلهما عبر Wi‑Fi إن أمكن."
+            text = "الوضع التلقائي يجرب Groq ثم Deepgram عند توفر مفاتيحهما، ثم Vosk المحلي إذا كان مثبتاً. لا يستخدم OpenAI تلقائياً لتجنب تكلفة غير مقصودة. بعد تنزيل نموذج Vosk مرة واحدة يعمل دون إنترنت ودون مفتاح API. نموذج العربية نحو 318MB والإنجليزية نحو 40MB؛ يفضّل تنزيلهما عبر Wi‑Fi."
             textSize = 12f; setTextColor(Color.DKGRAY); setPadding(0, 6, 0, 6)
         })
 
@@ -213,6 +226,37 @@ object SettingsDialog {
                         deepLStatus.setTextColor(Color.RED)
                     }
                     .show()
+            }
+        })
+
+        root.addView(makeLabel(context, "مفتاح Gemini API — للترجمة النصية فقط"))
+        val geminiStatus = TextView(context).apply {
+            text = if (settings.hasGeminiApiKey()) "الحالة: محفوظ ✓" else "الحالة: غير محفوظ ✗"
+            textSize = 13f
+            setTextColor(if (settings.hasGeminiApiKey()) Color.GREEN else Color.RED)
+        }
+        root.addView(geminiStatus)
+        val geminiKeyInput = android.widget.EditText(context).apply {
+            hint = "أدخل مفتاح Gemini من Google AI Studio (اختياري)"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+        root.addView(geminiKeyInput)
+        root.addView(TextView(context).apply {
+            text = "يُستخدم لترجمة نصوص SRT فقط، بدفعات صغيرة لتقليل عدد الطلبات. الحصة المجانية لها حدود، وقد تُستخدم بيانات الطلبات لتحسين منتجات Google ضمن الخطة المجانية. اترك الحقل فارغاً للاحتفاظ بالمفتاح الحالي."
+            textSize = 11f; setTextColor(Color.DKGRAY)
+        })
+        root.addView(Button(context).apply {
+            text = "حذف مفتاح Gemini المحفوظ"
+            setOnClickListener {
+                AlertDialog.Builder(context).setTitle("حذف المفتاح")
+                    .setMessage("هل تريد حذف مفتاح Gemini المحفوظ؟")
+                    .setNegativeButton("إلغاء", null)
+                    .setPositiveButton("حذف") { _, _ ->
+                        settings.clearGeminiApiKey()
+                        geminiStatus.text = "الحالة: غير محفوظ ✗"
+                        geminiStatus.setTextColor(Color.RED)
+                    }.show()
             }
         })
 
@@ -413,6 +457,12 @@ object SettingsDialog {
                         deepLStatus.text = "الحالة: محفوظ ✓"
                         deepLStatus.setTextColor(Color.GREEN)
                     }
+                    val newGeminiKey = geminiKeyInput.text.toString().trim()
+                    if (newGeminiKey.isNotEmpty()) {
+                        settings.geminiApiKey = newGeminiKey
+                        geminiStatus.text = "الحالة: محفوظ ✓"
+                        geminiStatus.setTextColor(Color.GREEN)
+                    }
                     val newOpenAiKey = openAiKeyInput.text.toString().trim()
                     if (newOpenAiKey.isNotEmpty()) {
                         settings.openAiApiKey = newOpenAiKey
@@ -420,9 +470,11 @@ object SettingsDialog {
                         openAiStatus.setTextColor(Color.GREEN)
                     }
                     settings.sttProvider = when (providerSpinner.selectedItemPosition) {
-                        1 -> SubtitleSettings.STT_DEEPGRAM
-                        2 -> SubtitleSettings.STT_OPENAI
-                        3 -> SubtitleSettings.STT_LOCAL
+                        0 -> SubtitleSettings.STT_AUTO
+                        1 -> SubtitleSettings.STT_GROQ
+                        2 -> SubtitleSettings.STT_DEEPGRAM
+                        3 -> SubtitleSettings.STT_OPENAI
+                        4 -> SubtitleSettings.STT_LOCAL
                         else -> SubtitleSettings.STT_GROQ
                     }
                     overlay.applySettings(settings)

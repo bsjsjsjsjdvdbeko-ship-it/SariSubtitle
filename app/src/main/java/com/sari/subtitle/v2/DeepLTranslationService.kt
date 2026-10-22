@@ -15,6 +15,23 @@ object DeepLTranslationService {
     private val arabicRegex = Regex("[\\u0600-\\u06FF]")
     private val cyrillicRegex = Regex("[\\u0400-\\u04FF]")
 
+    /** ترجمة نص واحد: DeepL عند وجود مفتاح، ثم Google Translate ثم MyMemory. */
+    fun translateTextOnly(text: String, sourceLang: String, targetLang: String, apiKey: String = ""): String {
+        if (text.isBlank()) return text
+        if (apiKey.isNotBlank()) {
+            val deepL = tryDeepL(text, sourceLang, targetLang, apiKey).trim()
+            if (isUsableTranslation(text, deepL)) return deepL
+        }
+        val google = tryGoogleTranslate(text, targetLang).trim()
+        if (isUsableTranslation(text, google)) return google
+        val memory = tryMyMemory(text, sourceLang, targetLang).trim()
+        if (isUsableTranslation(text, memory)) return android.text.Html.fromHtml(memory, android.text.Html.FROM_HTML_MODE_LEGACY).toString()
+        throw IllegalStateException("تعذرت الترجمة عبر خدمات الترجمة المتاحة؛ تحقق من الاتصال وحدود الخدمات.")
+    }
+
+    private fun isUsableTranslation(original: String, translated: String): Boolean =
+        translated.isNotBlank() && !translated.contains("???")
+
     /**
      * ترجمة موثوقة متعددة المزودين:
      * 1. DeepL (إذا مفتاح موجود)

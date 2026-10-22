@@ -19,6 +19,7 @@ class SubtitleSettings(context: Context) {
         private const val KEY_OFFSET = "offset_ms"
         private const val KEY_PROCESSING_ENGINE = "processing_engine"
         private const val KEY_STT_PROVIDER = "stt_provider"
+        const val STT_AUTO = "auto-free"
         const val STT_GROQ = "groq"
         const val STT_DEEPGRAM = "deepgram"
         const val STT_OPENAI = "openai"
@@ -93,6 +94,13 @@ class SubtitleSettings(context: Context) {
     fun clearOpenAiApiKey() = openAiKeyStore.clear()
     fun hasOpenAiApiKey(): Boolean = try { openAiKeyStore.read().isNotBlank() } catch (_: Exception) { false }
 
+    private val geminiKeyStore = GeminiApiKeyStore(context.applicationContext)
+    var geminiApiKey: String
+        get() = try { geminiKeyStore.read() } catch (_: Exception) { "" }
+        set(value) { if (value.isBlank()) geminiKeyStore.clear() else geminiKeyStore.save(value) }
+    fun clearGeminiApiKey() = geminiKeyStore.clear()
+    fun hasGeminiApiKey(): Boolean = try { geminiKeyStore.read().isNotBlank() } catch (_: Exception) { false }
+
     private val deepLKeyStore = DeepLApiKeyStore(context.applicationContext)
     var deepLApiKey: String
         get() = try { deepLKeyStore.read() } catch (_: Exception) { "" }
@@ -102,14 +110,17 @@ class SubtitleSettings(context: Context) {
 
 
     var sttProvider: String
-        get() = prefs.getString(KEY_STT_PROVIDER, STT_GROQ) ?: STT_GROQ
+        get() = prefs.getString(KEY_STT_PROVIDER, STT_AUTO) ?: STT_AUTO
         set(value) = prefs.edit().putString(KEY_STT_PROVIDER, when (value) {
+            STT_AUTO -> STT_AUTO
+            STT_GROQ -> STT_GROQ
             STT_DEEPGRAM -> STT_DEEPGRAM
             STT_OPENAI -> STT_OPENAI
             STT_LOCAL -> STT_LOCAL
             else -> STT_GROQ
         }).apply()
     val sttProviderLabel: String get() = when (sttProvider) {
+        STT_AUTO -> "تلقائي — المجاني أولاً"
         STT_DEEPGRAM -> "Deepgram Nova-3"
         STT_OPENAI -> "OpenAI Whisper"
         STT_LOCAL -> "Vosk محلي دون إنترنت"
