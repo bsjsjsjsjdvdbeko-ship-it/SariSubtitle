@@ -64,8 +64,6 @@ class SariSubtitleActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private val repo = SubtitleRepository()
     private var polling = false
-    /** Prevent overlapping evaluateJavascript calls from returning out of order. */
-    private var pollInFlight = false
     private var overlayOn = false
 
     /** آخر SRT نصي محمّل (للحفظ عند الحاجة) */
@@ -104,22 +102,9 @@ class SariSubtitleActivity : AppCompatActivity() {
                 "AppleWebKit/537.36 (KHTML, like Gecko) " +
                 "Chrome/120.0.0.0 Mobile Safari/537.36"
         }
-        // WebView debugging is useful during development but must not be enabled in release builds.
-        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+        WebView.setWebContentsDebuggingEnabled(true)
 
         webView.webViewClient = object : WebViewClient() {
-            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                super.onPageStarted(view, url, favicon)
-                // Never show the previous video's subtitles over a different page/video.
-                if (url != null && lastSrtUrl != null && url != lastSrtUrl) {
-                    repo.clear()
-                    lastSrtText = null
-                    lastSrtUrl = null
-                    overlayOn = false
-                    subtitleOverlay.hide()
-                }
-            }
-
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 injectAutoShow()
@@ -1134,7 +1119,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                         Toast.makeText(this, "سيتم التقاط أول دقيقتين فقط", Toast.LENGTH_LONG).show()
                     }
                     
-                    startCurrentWebVideoRecording()
+                    startCurrentWebVideoRecording(duration)
                 } catch (e: Exception) {
                     Toast.makeText(this, "خطأ: ${e.message}", Toast.LENGTH_LONG).show()
                 }
@@ -1142,7 +1127,8 @@ class SariSubtitleActivity : AppCompatActivity() {
         }
     }
     
-    private fun startCurrentWebVideoRecording() {
+    private fun startCurrentWebVideoRecording(duration: Double) {
+        val recordDurationMs = (minOf(duration * 1000.0, 120000.0)).toInt()
         val progress = android.app.ProgressDialog(this).apply {
             setTitle("🎙️ تسجيل الصوت")
             setMessage("جارٍ التسجيل…")
@@ -1217,18 +1203,14 @@ class SariSubtitleActivity : AppCompatActivity() {
                     var reader = new FileReader();
                     reader.onload = () => resolve(JSON.stringify({
                       audio: reader.result.split(',')[1],
-                      size: blob.size,
-                      startTimeSeconds: captureStartTime
+                      size: blob.size
                     }));
                     reader.readAsDataURL(blob);
                   };
-                  var captureStartTime = v.currentTime;
-                  var remainingSeconds = Number.isFinite(v.duration) ? Math.max(0, v.duration - captureStartTime) : 120;
-                  var recordDurationMs = Math.max(1000, Math.min(120000, remainingSeconds * 1000));
                   recorder.start();
                   setTimeout(() => {
                     if (recorder.state !== 'inactive') recorder.stop();
-                  }, recordDurationMs);
+                  }, ${recordDurationMs});
                 });
               } catch(e) {
                 return JSON.stringify({error: String(e)});
@@ -1261,11 +1243,10 @@ class SariSubtitleActivity : AppCompatActivity() {
                     }
                     val b64 = obj.getString("audio")
                     val sizeKB = obj.optInt("size", 0) / 1024
-                    val startOffsetMs = (obj.optDouble("startTimeSeconds", 0.0).coerceAtLeast(0.0) * 1000.0).toLong()
                     Toast.makeText(this, "✅ تسجيل $sizeKB KB", Toast.LENGTH_LONG).show()
-                    statusText.text = "✅ $sizeKB KB — إرسال إلى مزود التفريغ المختار…"
+                    statusText.text = "✅ $sizeKB KB — إرسال إلى Groq…"
                     val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                    sendToGroq(bytes, startOffsetMs)
+                    sendToGroq(bytes)
                 } catch (e: Exception) {
                     Toast.makeText(this, "خطأ: ${e.message}", Toast.LENGTH_LONG).show()
                 }
@@ -1273,7 +1254,7 @@ class SariSubtitleActivity : AppCompatActivity() {
         }
     }
     
-    private fun sendToGroq(audioBytes: ByteArray, sourceStartOffsetMs: Long = 0L) {
+    private fun sendToGroq(audioBytes: ByteArray) {
         if (!hasSelectedSttKey()) {
             Toast.makeText(this, "جهّز مزود التفريغ من الإعدادات (مفتاح API أو نموذج Vosk المحلي) أولاً", Toast.LENGTH_LONG).show()
             return
@@ -1303,16 +1284,11 @@ class SariSubtitleActivity : AppCompatActivity() {
                 val tempFile = java.io.File(cacheDir, "x_audio_${System.currentTimeMillis()}.webm")
                 tempFile.writeBytes(audioBytes)
 
-                val rawResult = try {
+                val result = try {
                     transcribeWithSelectedProvider(android.net.Uri.fromFile(tempFile), "auto")
                 } finally {
                     tempFile.delete()
                 }
-                // The capture may begin midway through a video. Shift cue timestamps by
-                // that starting position so they align with the full video's timeline.
-                val result = if (sourceStartOffsetMs > 0L) {
-                    rawResult.copy(srt = SrtTimestampShifter.shift(rawResult.srt, sourceStartOffsetMs))
-                } else rawResult
 
                 handler.removeCallbacks(timer)
                 runOnUiThread {
@@ -1442,13 +1418,12 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
     private fun hasSelectedSttKey(): Boolean {
         val hasLocalModel = VoskModelManager.isInstalled(applicationContext, VoskModelManager.ARABIC) ||
             VoskModelManager.isInstalled(applicationContext, VoskModelManager.ENGLISH)
-        // Selecting Vosk means an explicit offline-only request. For cloud selections,
-        // any configured cloud key is usable because the dispatcher tries the selected
-        // provider first and then the other configured providers as fallbacks.
-        if (settings.sttProvider == SubtitleSettings.STT_LOCAL) return hasLocalModel
-        return settings.groqApiKey.isNotBlank() ||
-            settings.deepgramApiKey.isNotBlank() ||
-            settings.openAiApiKey.isNotBlank() || hasLocalModel
+        return when (settings.sttProvider) {
+            SubtitleSettings.STT_LOCAL -> hasLocalModel
+            SubtitleSettings.STT_OPENAI -> settings.openAiApiKey.isNotBlank() || hasLocalModel
+            SubtitleSettings.STT_DEEPGRAM -> settings.deepgramApiKey.isNotBlank() || settings.groqApiKey.isNotBlank() || hasLocalModel
+            else -> settings.groqApiKey.isNotBlank() || settings.deepgramApiKey.isNotBlank() || hasLocalModel
+        }
     }
 
     /** Cloud providers are tried first; installed Vosk is the no-quota local fallback. */
@@ -1477,28 +1452,21 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         val selected = settings.sttProvider
         val hasLocalModel = VoskModelManager.isInstalled(applicationContext, VoskModelManager.ARABIC) ||
             VoskModelManager.isInstalled(applicationContext, VoskModelManager.ENGLISH)
-        fun hasKey(provider: String): Boolean = when (provider) {
+        val cloudProviders = when (selected) {
+            SubtitleSettings.STT_LOCAL -> emptyList()
+            SubtitleSettings.STT_DEEPGRAM -> listOf(SubtitleSettings.STT_DEEPGRAM, SubtitleSettings.STT_GROQ)
+            SubtitleSettings.STT_GROQ -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
+            else -> listOf(SubtitleSettings.STT_OPENAI)
+        }.filter { provider -> when (provider) {
             SubtitleSettings.STT_DEEPGRAM -> settings.deepgramApiKey.isNotBlank()
             SubtitleSettings.STT_OPENAI -> settings.openAiApiKey.isNotBlank()
-            SubtitleSettings.STT_GROQ -> settings.groqApiKey.isNotBlank()
-            else -> false
-        }
-
-        // Respect the selected provider as first choice, but don't strand the user when
-        // its quota/service is unavailable. Try every other configured cloud provider,
-        // then Vosk if installed. Vosk selection remains explicitly offline-only.
-        val cloudOrder = when (selected) {
-            SubtitleSettings.STT_DEEPGRAM -> listOf(SubtitleSettings.STT_DEEPGRAM, SubtitleSettings.STT_GROQ, SubtitleSettings.STT_OPENAI)
-            SubtitleSettings.STT_OPENAI -> listOf(SubtitleSettings.STT_OPENAI, SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
-            else -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM, SubtitleSettings.STT_OPENAI)
-        }
-        val cloudProviders = if (selected == SubtitleSettings.STT_LOCAL) emptyList()
-            else cloudOrder.filter(::hasKey)
+            else -> settings.groqApiKey.isNotBlank()
+        } }
         val providers = if (selected == SubtitleSettings.STT_LOCAL) listOf(SubtitleSettings.STT_LOCAL)
             else cloudProviders + if (hasLocalModel) listOf(SubtitleSettings.STT_LOCAL) else emptyList()
 
         if (providers.isEmpty()) {
-            throw IllegalStateException("لا يوجد مزود تفريغ جاهز. أضف مفتاح Groq أو Deepgram أو OpenAI، أو نزّل نموذج Vosk المحلي من الإعدادات.")
+            throw IllegalStateException("لا يوجد مزود تفريغ جاهز. أضف مفتاح Groq أو Deepgram، أو نزّل نموذج Vosk المحلي من الإعدادات.")
         }
         val failures = mutableListOf<String>()
         for (provider in providers.distinct()) {
@@ -1587,15 +1555,6 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         val view = layoutInflater.inflate(R.layout.bottom_sheet_menu, null)
         sheet.setContentView(view)
 
-        // إظهار الأدوات المتقدمة عند الطلب، وإبقاء الشاشة الأساسية بسيطة.
-        val advancedTools = view.findViewById<android.view.View>(R.id.advancedToolsContainer)
-        val advancedToggle = view.findViewById<Button>(R.id.toggleAdvancedToolsButton)
-        advancedToggle?.setOnClickListener {
-            val showAdvanced = advancedTools?.visibility != android.view.View.VISIBLE
-            advancedTools?.visibility = if (showAdvanced) android.view.View.VISIBLE else android.view.View.GONE
-            advancedToggle.text = if (showAdvanced) "⚙ إخفاء الأدوات المتقدمة  ▴" else "⚙ أدوات متقدمة وإعدادات المزامنة  ▾"
-        }
-
         // ربط كل زر داخل Bottom Sheet
         view.findViewById<Button>(R.id.bsOpenChromeDownloaderButton)?.setOnClickListener {
             sheet.dismiss()
@@ -1661,11 +1620,6 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         view.findViewById<Button>(R.id.bsTranslateSrtButton)?.setOnClickListener {
             sheet.dismiss()
             findViewById<Button>(R.id.translateSrtButton)?.performClick()
-        }
-
-        view.findViewById<Button>(R.id.bsSavedItemsButton)?.setOnClickListener {
-            sheet.dismiss()
-            showSavedSubtitles()
         }
 
         view.findViewById<Button>(R.id.bsOffsetMinus)?.setOnClickListener {
@@ -1889,7 +1843,27 @@ private fun openAudioPicker() {
                     handler.removeCallbacks(timer)
                     progress.dismiss()
                     pendingWhisperSrt = result.srt
-                    statusText.text = "✅ اكتمل التفريغ: ${result.segmentCount} مقطع (${totalTime}s)"
+
+                    // حمّل نتيجة التفريغ مباشرة إلى عارض الترجمة؛ لا تجعلها ملفاً للحفظ فقط.
+                    val parsedCues = try {
+                        SrtParser.parse(result.srt.byteInputStream(Charsets.UTF_8))
+                    } catch (parseError: Exception) {
+                        android.util.Log.e("SariSrt", "Failed to parse generated transcription SRT", parseError)
+                        emptyList()
+                    }
+                    if (parsedCues.isNotEmpty()) {
+                        repo.setCues(parsedCues)
+                        lastSrtText = result.srt
+                        val currentUrl = urlInput.text.toString().trim()
+                        if (currentUrl.startsWith("http://", ignoreCase = true) || currentUrl.startsWith("https://", ignoreCase = true)) {
+                            storage.save(currentUrl, result.srt, parsedCues.size)
+                            lastSrtUrl = currentUrl
+                        }
+                        overlayOn = true
+                        statusText.text = "✅ اكتمل التفريغ وعُرضت الترجمة: ${parsedCues.size} مقطع (${totalTime}s)"
+                    } else {
+                        statusText.text = "⚠️ اكتمل التفريغ، لكن تعذّر تحليل توقيت SRT لعرضه. يمكنك حفظ الملف وفحصه."
+                    }
                     Toast.makeText(this, "✅ اكتمل التفريغ بعد ${totalTime} ثانية", Toast.LENGTH_LONG).show()
                     val saveIntent3 = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                         addCategory(Intent.CATEGORY_OPENABLE)
@@ -2066,16 +2040,12 @@ private fun openAudioPicker() {
             override fun run() {
                 if (!polling) return
                 pollCurrentTimeOnce()
-                handler.postDelayed(this, 250L)
+                handler.postDelayed(this, 500L)
             }
         })
     }
 
     private fun pollCurrentTimeOnce() {
-        // Keep at most one DOM query in flight. Otherwise slow WebView evaluations can
-        // overlap and deliver stale timestamps after newer ones.
-        if (pollInFlight || !::webView.isInitialized || isFinishing || isDestroyed) return
-        pollInFlight = true
         val js = """
             (function() {
               try {
@@ -2121,11 +2091,10 @@ private fun openAudioPicker() {
         """.trimIndent()
 
         webView.evaluateJavascript(js) { raw ->
-            pollInFlight = false
             val decoded = try {
                 org.json.JSONTokener(raw ?: "null").nextValue().toString()
             } catch (_: Exception) { "null" }
-            if (!isFinishing && !isDestroyed) onTimeUpdate(decoded)
+            runOnUiThread { onTimeUpdate(decoded) }
         }
     }
 
@@ -2138,8 +2107,6 @@ private fun openAudioPicker() {
             }
             val total = o.optInt("totalVideos", 0)
             if (total == 0) {
-                // Avoid leaving a stale subtitle visible after the page removes its video.
-                subtitleOverlay.hide()
                 statusText.text = "لا يوجد فيديو — total=0"
                 return
             }

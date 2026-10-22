@@ -12,6 +12,7 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.roundToInt
+import java.util.Locale
 
 /** Genuine on-device STT using Vosk. Audio is decoded with Android MediaCodec; no audio is uploaded. */
 class OfflineVoskTranscriber(private val context: Context) {
@@ -215,6 +216,6 @@ class OfflineVoskTranscriber(private val context: Context) {
         val minutes = (safe % 3_600_000) / 60_000
         val seconds = (safe % 60_000) / 1000
         val millis = safe % 1000
-        return "%02d:%02d:%02d,%03d".format(hours, minutes, seconds, millis)
+        return String.format(Locale.US, "%02d:%02d:%02d,%03d", hours, minutes, seconds, millis)
     }
 }

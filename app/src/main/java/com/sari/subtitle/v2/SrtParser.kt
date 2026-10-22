@@ -65,8 +65,16 @@ object SrtParser {
     private fun parseText(content: String): List<SubtitleCue> {
         val cues = mutableListOf<SubtitleCue>()
 
+        // توحيد الأرقام العشرية إلى ASCII (يدعم أرقام العربية والفارسية في طوابع SRT).
+        val asciiDigits = buildString(content.length) {
+            for (ch in content) {
+                val digit = if (Character.getType(ch) == Character.DECIMAL_DIGIT_NUMBER.toInt()) Character.digit(ch, 10) else -1
+                append(if (digit in 0..9) ('0'.code + digit).toChar() else ch)
+            }
+        }
+
         // توحيد نهاية الأسطر
-        val normalized = content.replace("\r\n", "\n").replace('\r', '\n')
+        val normalized = asciiDigits.replace("\r\n", "\n").replace('\r', '\n')
 
         // نقسم على الأسطر
         val lines = normalized.split('\n')
