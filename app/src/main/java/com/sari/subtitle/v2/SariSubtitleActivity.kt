@@ -43,7 +43,7 @@ class SariSubtitleActivity : AppCompatActivity() {
 
     companion object {
         private const val REQ_PICK_AUDIO = 1004
-        private const val REQ_PICK_VIDEO_FOR_AUTO = 1005
+        private const val REQ_PICK_VIDEO_FOR_AUTO = 1007
         private const val REQ_SAVE_WHISPER_SRT = 1005
         private const val REQ_SUBWHISPER_INTERNAL = 1006
         private const val REQ_PICK_SRT = 1001
@@ -1447,7 +1447,7 @@ class SariSubtitleActivity : AppCompatActivity() {
             .setTitle("تعذّر استخراج الصوت")
             .setMessage("لا يمكن استخراج الصوت من هذا الرابط. يرجى تحميل الفيديو أولاً باستخدام أداة التنزيل، ثم اختياره من هاتفك. بعد اختياره سيحاول التطبيق تفريغ الصوت ثم ترجمته إلى العربية تلقائياً.")
             .setNegativeButton("إلغاء", null)
-            .setNeutralButton("اختيار فيديو من الهاتف") { _, _ -> openVideoPickerForAutoTranscription() }
+            .setNeutralButton("اختيار ملف صوت أو فيديو") { _, _ -> openVideoPickerForAutoTranscription() }
             .setPositiveButton("فتح أداة التنزيل") { _, _ -> openChromeForDownload() }
             .show()
     }
@@ -1455,17 +1455,25 @@ class SariSubtitleActivity : AppCompatActivity() {
     private fun openVideoPickerForAutoTranscription() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "video/*"
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("video/*", "audio/*"))
         }
         try {
-            startActivityForResult(Intent.createChooser(intent, "اختر الفيديو الذي حمّلته"), REQ_PICK_VIDEO_FOR_AUTO)
+            startActivityForResult(Intent.createChooser(intent, "اختر ملف صوت أو فيديو"), REQ_PICK_VIDEO_FOR_AUTO)
         } catch (_: Exception) {
             Toast.makeText(this, "تعذّر فتح مدير الملفات", Toast.LENGTH_LONG).show()
         }
     }
 
-    /** Transcribes a selected local video, extracts its audio track for cloud STT when possible,
-     * then automatically translates the generated SRT to Arabic and caches it. */
+    private fun queryDisplayName(uri: Uri): String? {
+        return try {
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        } catch (_: Exception) { null }
+    }
+
+    /** Transcribes a selected local audio or video file, then translates the generated SRT to Arabic. */
     private fun transcribeDownloadedVideo(uri: Uri) {
         if (!hasSelectedSttKey()) {
             Toast.makeText(this, "أضف مفتاح Groq أو ثبّت نموذج Vosk المحلي من الإعدادات أولاً", Toast.LENGTH_LONG).show()
@@ -1473,19 +1481,25 @@ class SariSubtitleActivity : AppCompatActivity() {
         }
         val progress = ProgressDialog(this).apply {
             setTitle("إنشاء الترجمة العربية")
-            setMessage("جارٍ تجهيز الصوت من الفيديو…")
+            setMessage("جارٍ تجهيز الملف الصوتي…")
             setProgressStyle(ProgressDialog.STYLE_SPINNER)
             setCancelable(false)
             show()
         }
         statusText.visibility = android.view.View.VISIBLE
-        statusText.text = "جارٍ تفريغ الفيديو المحلي ثم ترجمته إلى العربية…"
+        statusText.text = "جارٍ تفريغ الملف الصوتي أو الفيديو ثم ترجمته إلى العربية…"
         Thread {
             var extractedAudio: java.io.File? = null
             try {
+                val mimeType = contentResolver.getType(uri).orEmpty().lowercase(java.util.Locale.ROOT)
+                val displayName = queryDisplayName(uri).orEmpty().lowercase(java.util.Locale.ROOT)
+                val isAudioFile = mimeType.startsWith("audio/") ||
+                    displayName.substringAfterLast('.', "") in setOf("mp3", "m4a", "aac", "wav", "ogg", "opus", "flac", "amr", "3gp")
                 val selectedIsLocal = settings.sttProvider == SubtitleSettings.STT_LOCAL
                 val cloudKeyAvailable = settings.groqApiKey.isNotBlank() || settings.deepgramApiKey.isNotBlank() || settings.openAiApiKey.isNotBlank()
-                val result = if (selectedIsLocal || !cloudKeyAvailable) {
+                // Audio files (MP3/M4A/WAV, etc.) go directly to the selected transcriber;
+                // only video files need their audio track extracted for cloud STT.
+                val result = if (isAudioFile || selectedIsLocal || !cloudKeyAvailable) {
                     transcribeWithSelectedProvider(uri, "auto")
                 } else {
                     try {
@@ -1509,7 +1523,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (isFinishing) return@runOnUiThread
                     progress.setMessage("اكتمل التفريغ — جارٍ ترجمة SRT إلى العربية…")
-                    translateAndShowSrtAutomatically("local-video://${uri.lastPathSegment ?: System.currentTimeMillis()}", rawSrt, "downloaded-video-${System.currentTimeMillis()}.srt")
+                    translateAndShowSrtAutomatically("local-media://${uri.lastPathSegment ?: System.currentTimeMillis()}", rawSrt, "downloaded-media-${System.currentTimeMillis()}.srt")
                     progress.dismiss()
                 }
             } catch (e: Exception) {
@@ -1566,7 +1580,7 @@ class SariSubtitleActivity : AppCompatActivity() {
             return output
         } catch (e: Exception) {
             output.delete()
-            throw IllegalStateException("تعذّر تجهيز مسار الصوت لإرساله إلى Groq: ${e.message}", e)
+            throw IllegalStateException("تعذّر تجهيز مسار الصوت لإرساله إلى مزود التفريغ: ${e.message}", e)
         } finally {
             try { muxer?.release() } catch (_: Exception) {}
             try { extractor.release() } catch (_: Exception) {}
