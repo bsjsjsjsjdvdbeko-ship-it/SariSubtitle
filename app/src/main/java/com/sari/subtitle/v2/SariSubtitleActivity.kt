@@ -1024,7 +1024,7 @@ class SariSubtitleActivity : AppCompatActivity() {
             setMessage("جارٍ اكتشاف اللغة…")
             setProgressStyle(ProgressDialog.STYLE_SPINNER)
             setCancelable(false)
-            setButton(ProgressDialog.BUTTON_NEGATIVE, "إلغاء", null)
+            setButton(ProgressDialog.BUTTON_NEGATIVE, "إلغاء", android.content.DialogInterface.OnClickListener { _, _ -> })
             show()
         }
         // Override the default button dismissal so the user can see that the current
@@ -2270,6 +2270,78 @@ private fun openAudioPicker() {
         val m = total / 60
         val sec = total % 60
         return "%02d:%02d".format(m, sec)
+    }
+
+    /** Updates the visible status area from workflows that restore saved subtitles. */
+    private fun showStatus(message: String) {
+        statusText.text = message
+        statusText.visibility = android.view.View.VISIBLE
+    }
+
+    /** Handles blob:/data: downloads initiated by a page inside the WebView. */
+    private fun downloadBlobViaJs(url: String, mimeType: String?) {
+        val safeUrl = JSONObject.quote(url)
+        val js = """
+            (function(){
+              try {
+                fetch($safeUrl).then(function(r){ return r.blob(); }).then(function(b){
+                  var fr = new FileReader();
+                  fr.onloadend = function(){
+                    var s = String(fr.result || '');
+                    var p = s.indexOf(',');
+                    window.__sariBlobResult = JSON.stringify({data: p >= 0 ? s.substring(p+1) : '', type: b.type || ''});
+                  };
+                  fr.readAsDataURL(b);
+                }).catch(function(e){ window.__sariBlobResult = JSON.stringify({error: String(e)}); });
+              } catch(e) { window.__sariBlobResult = JSON.stringify({error: String(e)}); }
+            })();
+        """.trimIndent()
+        webView.evaluateJavascript("window.__sariBlobResult = null; $js", null)
+        val deadline = System.currentTimeMillis() + 120_000L
+        val poll = object : Runnable {
+            override fun run() {
+                webView.evaluateJavascript("window.__sariBlobResult || null") { result ->
+                    try {
+                        val decoded = org.json.JSONTokener(result ?: "null").nextValue()
+                        if (decoded !is String) {
+                            if (System.currentTimeMillis() < deadline) handler.postDelayed(this, 250L)
+                            else Toast.makeText(this@SariSubtitleActivity, "انتهت مهلة تجهيز الملف من صفحة الويب", Toast.LENGTH_LONG).show()
+                            return@evaluateJavascript
+                        }
+                        val payload = JSONObject(decoded)
+                        if (payload.has("error")) {
+                            Toast.makeText(this@SariSubtitleActivity, "فشل تجهيز الملف: ${payload.optString("error")}", Toast.LENGTH_LONG).show()
+                            return@evaluateJavascript
+                        }
+                        val data = payload.optString("data")
+                        if (data.isBlank()) {
+                            Toast.makeText(this@SariSubtitleActivity, "الملف فارغ أو تعذر قراءته", Toast.LENGTH_LONG).show()
+                            return@evaluateJavascript
+                        }
+                        val bytes = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
+                        val type = payload.optString("type").ifBlank { mimeType ?: "application/octet-stream" }
+                        val guessed = URLUtil.guessFileName("download", null, type)
+                            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+                            .ifBlank { "download.bin" }
+                        val values = android.content.ContentValues().apply {
+                            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, guessed)
+                            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, type)
+                            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                        }
+                        val target = contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                            ?: throw IOException("تعذر إنشاء الملف في مجلد التنزيلات")
+                        contentResolver.openOutputStream(target)?.use { it.write(bytes) }
+                            ?: throw IOException("تعذر الكتابة إلى الملف")
+                        showStatus("اكتمل التنزيل: $guessed")
+                        Toast.makeText(this@SariSubtitleActivity, "تم حفظ الملف في التنزيلات: $guessed", Toast.LENGTH_LONG).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(this@SariSubtitleActivity, "فشل حفظ الملف: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+        handler.postDelayed(poll, 250L)
+        showStatus("جارٍ تجهيز الملف الذي طلبت صفحة الويب تنزيله…")
     }
 
     override fun onDestroy() {
