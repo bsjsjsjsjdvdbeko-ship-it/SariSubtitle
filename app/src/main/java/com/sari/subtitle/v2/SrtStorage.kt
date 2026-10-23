@@ -5,6 +5,9 @@ import android.net.Uri
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
+import java.util.UUID
+
+data class SavedSrtItem(val id: String, val title: String, val cueCount: Int, val savedAt: Long)
 
 /**
  * إدارة تخزين ملفات SRT محلياً، مع فهرس URL → ملف.
@@ -24,6 +27,61 @@ class SrtStorage(private val context: Context) {
     }
 
     private val indexFile: File by lazy { File(dir, "index.json") }
+    private val libraryIndexFile: File by lazy { File(dir, "library-index.json") }
+
+    /** حفظ ملف SRT مستقل في مكتبة التطبيق حتى لو لم يكن مرتبطاً برابط فيديو. */
+    fun saveLibraryItem(title: String, srtText: String, cueCount: Int): String? {
+        return try {
+            val id = UUID.randomUUID().toString()
+            val fileName = "library_$id.srt"
+            File(dir, fileName).writeText(srtText, Charsets.UTF_8)
+            val index = readLibraryIndex()
+            index.put(id, JSONObject().apply {
+                put("title", title.ifBlank { "ترجمة محفوظة.srt" })
+                put("fileName", fileName)
+                put("cueCount", cueCount)
+                put("savedAt", System.currentTimeMillis())
+            })
+            writeLibraryIndex(index)
+            id
+        } catch (_: Exception) { null }
+    }
+
+    fun listLibraryItems(): List<SavedSrtItem> {
+        return try {
+            val index = readLibraryIndex()
+            val items = mutableListOf<SavedSrtItem>()
+            val keys = index.keys()
+            while (keys.hasNext()) {
+                val id = keys.next()
+                val entry = index.optJSONObject(id) ?: continue
+                val fileName = entry.optString("fileName")
+                if (fileName.isBlank() || !File(dir, fileName).isFile) continue
+                items += SavedSrtItem(id, entry.optString("title", "ترجمة محفوظة.srt"), entry.optInt("cueCount"), entry.optLong("savedAt"))
+            }
+            items.sortedByDescending { it.savedAt }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    fun loadLibraryItem(id: String): String? {
+        return try {
+            val entry = readLibraryIndex().optJSONObject(id) ?: return null
+            val name = entry.optString("fileName")
+            if (name.isBlank()) null else File(dir, name).takeIf { it.isFile }?.readText(Charsets.UTF_8)
+        } catch (_: Exception) { null }
+    }
+
+    fun deleteLibraryItem(id: String): Boolean {
+        return try {
+            val index = readLibraryIndex()
+            val entry = index.optJSONObject(id) ?: return false
+            val name = entry.optString("fileName")
+            if (name.isNotBlank()) File(dir, name).delete()
+            index.remove(id)
+            writeLibraryIndex(index)
+            true
+        } catch (_: Exception) { false }
+    }
 
     /**
      * يحفظ SRT مرتبطاً بـ URL.
@@ -179,6 +237,15 @@ class SrtStorage(private val context: Context) {
         } catch (e: Exception) {
             url.hashCode().toString()
         }
+    }
+
+    private fun readLibraryIndex(): JSONObject {
+        return try { if (libraryIndexFile.exists()) JSONObject(libraryIndexFile.readText(Charsets.UTF_8)) else JSONObject() }
+        catch (_: Exception) { JSONObject() }
+    }
+
+    private fun writeLibraryIndex(index: JSONObject) {
+        try { libraryIndexFile.writeText(index.toString(2), Charsets.UTF_8) } catch (_: Exception) {}
     }
 
     private fun readIndex(): JSONObject {

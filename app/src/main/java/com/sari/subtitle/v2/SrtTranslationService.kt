@@ -31,6 +31,7 @@ object SrtTranslationService {
         targetLang: String = "ar",
         onDetected: (String) -> Unit = {},
         context: Context? = null,
+        shouldCancel: () -> Boolean = { false },
         onProgress: (Int, Int) -> Unit = { _, _ -> }
     ): String {
         // 1. استخرج النص الأول للكشف
@@ -42,6 +43,7 @@ object SrtTranslationService {
             ?: throw IllegalArgumentException("تعذر اكتشاف لغة الملف")
 
         onDetected(detected)
+        if (shouldCancel()) throw java.util.concurrent.CancellationException("ألغى المستخدم العملية")
 
         // 3. إذا كانت اللغة الهدف، أعد كما هو
         if (detected.equals(targetLang, ignoreCase = true)) {
@@ -49,7 +51,14 @@ object SrtTranslationService {
         }
 
         // 4. ترجم
-        return translateSrt(source, detected, targetLang, context, onProgress)
+        return translateSrt(
+            source = source,
+            sourceLang = detected,
+            targetLang = targetLang,
+            context = context,
+            shouldCancel = shouldCancel,
+            onProgress = onProgress
+        )
     }
 
     fun translateSrt(
@@ -57,6 +66,7 @@ object SrtTranslationService {
         sourceLang: String,
         targetLang: String,
         context: Context? = null,
+        shouldCancel: () -> Boolean = { false },
         onProgress: (Int, Int) -> Unit = { _, _ -> }
     ): String {
         require(sourceLang.isNotBlank() && targetLang.isNotBlank()) {
@@ -88,6 +98,7 @@ object SrtTranslationService {
         var geminiAvailable = geminiKey.isNotBlank()
 
         for ((index, block) in blocks.withIndex()) {
+            if (shouldCancel()) throw java.util.concurrent.CancellationException("ألغى المستخدم العملية")
             val lines = block.split('\n').toMutableList()
             val timeIndex = lines.indexOfFirst { timestampPattern.containsMatchIn(it) }
             if (timeIndex < 0 || lines.drop(timeIndex + 1).all { it.isBlank() }) continue
@@ -108,6 +119,7 @@ object SrtTranslationService {
 
         // Gemini receives up to eight subtitle texts per request to reduce API calls on long files.
         for (batch in pending.chunked(8)) {
+            if (shouldCancel()) throw java.util.concurrent.CancellationException("ألغى المستخدم العملية")
             val geminiResults = if (geminiAvailable) {
                 try {
                     GeminiTranslationService.translateBatch(batch.map { it.text }, sourceLang, targetLang, geminiKey)
@@ -119,6 +131,7 @@ object SrtTranslationService {
             } else null
 
             for ((batchIndex, cue) in batch.withIndex()) {
+                if (shouldCancel()) throw java.util.concurrent.CancellationException("ألغى المستخدم العملية")
                 val translated = geminiResults?.getOrNull(batchIndex)?.takeIf { it.isNotBlank() }
                     ?: translateText(cue.text, sourceLang, targetLang, settings)
                 while (cue.lines.size > cue.timeIndex + 1) cue.lines.removeAt(cue.lines.lastIndex)
@@ -177,17 +190,27 @@ object SrtTranslationService {
     private fun translateText(text: String, sourceLang: String, targetLang: String, settings: SubtitleSettings?): String {
         if (text.isBlank()) return text
         if (text.length > 450) throw IllegalArgumentException("أحد مقاطع الترجمة طويل جداً؛ قصّره أو قسّمه")
+        val failures = mutableListOf<String>()
+        if (settings != null && settings.azureTranslatorKey.isNotBlank()) {
+            try { return AdditionalTranslationProviders.azure(text, sourceLang, targetLang, settings.azureTranslatorKey, settings.azureTranslatorRegion) }
+            catch (e: Exception) { failures += "Azure: ${e.message.orEmpty().take(100)}" }
+        }
+        if (settings != null && settings.huggingFaceToken.isNotBlank()) {
+            try { return AdditionalTranslationProviders.huggingFace(text, sourceLang, targetLang, settings.huggingFaceToken) }
+            catch (e: Exception) { failures += "Hugging Face: ${e.message.orEmpty().take(100)}" }
+        }
         var attempt = 0
         while (true) {
             try {
-                return DeepLTranslationService.translateTextOnly(
-                    text, sourceLang, targetLang, settings?.deepLApiKey.orEmpty()
-                )
+                return DeepLTranslationService.translateTextOnly(text, sourceLang, targetLang, settings?.deepLApiKey.orEmpty())
             } catch (e: Exception) {
                 attempt++
                 val message = e.message.orEmpty()
                 val retryable = e is IOException || Regex("HTTP (429|5\\d\\d)", RegexOption.IGNORE_CASE).containsMatchIn(message)
-                if (!retryable || attempt >= 2) throw e
+                if (!retryable || attempt >= 2) {
+                    failures += "المزودات الأساسية: ${message.take(140)}"
+                    throw IllegalStateException("فشلت الترجمة عبر المزودات المتاحة. ${failures.joinToString(" | ")}", e)
+                }
                 try { Thread.sleep(500L * attempt) } catch (interrupted: InterruptedException) {
                     Thread.currentThread().interrupt()
                     throw IOException("تم إيقاف انتظار إعادة محاولة الترجمة", interrupted)

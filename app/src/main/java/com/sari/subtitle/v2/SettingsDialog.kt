@@ -31,6 +31,11 @@ object SettingsDialog {
         // عنوان
         root.addView(makeTitle(context, "⚙️ إعدادات الترجمة"))
 
+        // مفاتيح الترجمة متاحة عند الحاجة فقط؛ لا نطلب من المستخدم اختيار المزود في كل مرة.
+        root.addView(Button(context).apply {
+            text = "إعداد مفاتيح الترجمة (اختياري)"
+            setOnClickListener { TranslationProvidersDialog.show(context, settings) }
+        })
 
         // ═══════════════════════════════════════════════════════════
         // مفتاح Groq API
@@ -195,71 +200,6 @@ object SettingsDialog {
             }
         })
 
-        root.addView(makeLabel(context, "مفتاح DeepL API (للترجمة)"))
-        val deepLStatus = TextView(context).apply {
-            text = if (settings.hasDeepLApiKey()) "الحالة: محفوظ ✓" else "الحالة: غير محفوظ ✗"
-            textSize = 13f
-            setTextColor(if (settings.hasDeepLApiKey()) Color.GREEN else Color.RED)
-        }
-        root.addView(deepLStatus)
-        val deepLApiKeyInput = android.widget.EditText(context).apply {
-            hint = "أدخل مفتاح DeepL (اختياري — جودة ترجمة 95%)"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setSingleLine(true)
-        }
-        root.addView(deepLApiKeyInput)
-        root.addView(TextView(context).apply {
-            text = "اتركه فارغاً للاحتفاظ. DeepL مجاني 500K حرف/شهر. للخطة المجانية، المفتاح ينتهي بـ :fx"
-            textSize = 11f
-            setTextColor(Color.GRAY)
-        })
-        root.addView(Button(context).apply {
-            text = "حذف مفتاح DeepL المحفوظ"
-            setOnClickListener {
-                AlertDialog.Builder(context)
-                    .setTitle("حذف المفتاح")
-                    .setMessage("هل تريد حذف مفتاح DeepL المحفوظ؟")
-                    .setNegativeButton("إلغاء", null)
-                    .setPositiveButton("حذف") { _, _ ->
-                        settings.clearDeepLApiKey()
-                        deepLStatus.text = "الحالة: غير محفوظ ✗"
-                        deepLStatus.setTextColor(Color.RED)
-                    }
-                    .show()
-            }
-        })
-
-        root.addView(makeLabel(context, "مفتاح Gemini API — للترجمة النصية فقط"))
-        val geminiStatus = TextView(context).apply {
-            text = if (settings.hasGeminiApiKey()) "الحالة: محفوظ ✓" else "الحالة: غير محفوظ ✗"
-            textSize = 13f
-            setTextColor(if (settings.hasGeminiApiKey()) Color.GREEN else Color.RED)
-        }
-        root.addView(geminiStatus)
-        val geminiKeyInput = android.widget.EditText(context).apply {
-            hint = "أدخل مفتاح Gemini من Google AI Studio (اختياري)"
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setSingleLine(true)
-        }
-        root.addView(geminiKeyInput)
-        root.addView(TextView(context).apply {
-            text = "يُستخدم لترجمة نصوص SRT فقط، بدفعات صغيرة لتقليل عدد الطلبات. الحصة المجانية لها حدود، وقد تُستخدم بيانات الطلبات لتحسين منتجات Google ضمن الخطة المجانية. اترك الحقل فارغاً للاحتفاظ بالمفتاح الحالي."
-            textSize = 11f; setTextColor(Color.DKGRAY)
-        })
-        root.addView(Button(context).apply {
-            text = "حذف مفتاح Gemini المحفوظ"
-            setOnClickListener {
-                AlertDialog.Builder(context).setTitle("حذف المفتاح")
-                    .setMessage("هل تريد حذف مفتاح Gemini المحفوظ؟")
-                    .setNegativeButton("إلغاء", null)
-                    .setPositiveButton("حذف") { _, _ ->
-                        settings.clearGeminiApiKey()
-                        geminiStatus.text = "الحالة: غير محفوظ ✗"
-                        geminiStatus.setTextColor(Color.RED)
-                    }.show()
-            }
-        })
-
         root.addView(makeLabel(context, "مفتاح OpenAI API"))
         val openAiStatus = TextView(context).apply {
             text = if (settings.hasOpenAiApiKey()) "الحالة: محفوظ ✓" else "الحالة: غير محفوظ ✗"
@@ -272,6 +212,7 @@ object SettingsDialog {
             setSingleLine(true)
         }
         root.addView(openAiKeyInput)
+
         root.addView(TextView(context).apply {
             text = "تنبيه: استخدام OpenAI API قد يتطلب رصيداً مدفوعاً. لا يوجد ضمان لاستخدام مجاني."
             textSize = 11f; setTextColor(Color.DKGRAY)
@@ -450,18 +391,6 @@ object SettingsDialog {
                         settings.deepgramApiKey = newDeepgramKey
                         deepgramStatus.text = "الحالة: محفوظ ✓"
                         deepgramStatus.setTextColor(Color.GREEN)
-                    }
-                    val newDeepLKey = deepLApiKeyInput.text.toString().trim()
-                    if (newDeepLKey.isNotEmpty()) {
-                        settings.deepLApiKey = newDeepLKey
-                        deepLStatus.text = "الحالة: محفوظ ✓"
-                        deepLStatus.setTextColor(Color.GREEN)
-                    }
-                    val newGeminiKey = geminiKeyInput.text.toString().trim()
-                    if (newGeminiKey.isNotEmpty()) {
-                        settings.geminiApiKey = newGeminiKey
-                        geminiStatus.text = "الحالة: محفوظ ✓"
-                        geminiStatus.setTextColor(Color.GREEN)
                     }
                     val newOpenAiKey = openAiKeyInput.text.toString().trim()
                     if (newOpenAiKey.isNotEmpty()) {

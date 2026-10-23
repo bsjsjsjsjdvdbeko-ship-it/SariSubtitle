@@ -108,6 +108,21 @@ class SubtitleSettings(context: Context) {
     fun clearDeepLApiKey() = deepLKeyStore.clear()
     fun hasDeepLApiKey(): Boolean = try { deepLKeyStore.read().isNotBlank() } catch (_: Exception) { false }
 
+    private val huggingFaceStore = ExtraApiKeyStore(context.applicationContext, "huggingface")
+    var huggingFaceToken: String
+        get() = try { huggingFaceStore.read() } catch (_: Exception) { "" }
+        set(value) { if (value.isBlank()) huggingFaceStore.clear() else huggingFaceStore.save(value) }
+    fun hasHuggingFaceToken(): Boolean = try { huggingFaceStore.read().isNotBlank() } catch (_: Exception) { false }
+
+    private val azureTranslatorStore = ExtraApiKeyStore(context.applicationContext, "azure_translator")
+    var azureTranslatorKey: String
+        get() = try { azureTranslatorStore.read() } catch (_: Exception) { "" }
+        set(value) { if (value.isBlank()) azureTranslatorStore.clear() else azureTranslatorStore.save(value) }
+    fun hasAzureTranslatorKey(): Boolean = try { azureTranslatorStore.read().isNotBlank() } catch (_: Exception) { false }
+    var azureTranslatorRegion: String
+        get() = prefs.getString("azure_translator_region", "global") ?: "global"
+        set(value) = prefs.edit().putString("azure_translator_region", value.trim()).apply()
+
 
     var sttProvider: String
         get() = prefs.getString(KEY_STT_PROVIDER, STT_AUTO) ?: STT_AUTO

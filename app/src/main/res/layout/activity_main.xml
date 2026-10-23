@@ -43,13 +43,12 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:hint="@string/hint_url"
+            android:hint="الصق رابط الفيديو هنا…"
             android:inputType="textUri"
             android:singleLine="true"
-            android:textSize="12sp"
+            android:textSize="14sp"
             android:textColor="@android:color/white"
-            android:textColorHint="#888888"
-            android:text="https://x.com/" />
+            android:textColorHint="#B0B0B0" />
 
         <Button
             android:id="@+id/loadButton"
@@ -74,22 +73,25 @@
         android:layout_height="wrap_content"
         android:layout_above="@+id/bottomBar"
         android:padding="6dp"
-        android:fontFamily="monospace"
-        android:textSize="10sp"
-        android:textColor="#00FF88"
+        android:fontFamily="sans"
+        android:textSize="12sp"
+        android:textColor="#FFFFFF"
         android:maxLines="3"
-        android:background="#80000000"
+        android:background="#CC202020"
         android:visibility="gone"
         android:text="@string/status_ready" />
 
-    <!-- الشريط السفلي (4 أزرار فقط) -->
+    <!-- شريط المهام الرئيسي: بدء تلقائي، اختيار ملف ذكي، ومكتبة محفوظات -->
     <LinearLayout
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
         android:orientation="horizontal"
-        android:padding="4dp"
+        android:gravity="center"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="6dp"
         android:paddingBottom="24dp"
         android:background="#1A1A1A">
 
@@ -97,33 +99,35 @@
             android:id="@+id/menuButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textSize="18sp"
-            android:text="☰" />
-
-        <Button
-            android:id="@+id/toggleOverlayButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textSize="11sp"
-            android:text="ترجمة" />
+            android:layout_weight="1.35"
+            android:minHeight="54dp"
+            android:layout_marginEnd="4dp"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:text="ابدأ الترجمة"
+            android:contentDescription="ابدأ ترجمة الفيديو تلقائيًا بالعربية من الرابط الحالي أو المنسوخ" />
 
         <Button
             android:id="@+id/loadSrtButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:textSize="11sp"
-            android:text="SRT" />
+            android:minHeight="54dp"
+            android:layout_marginHorizontal="4dp"
+            android:textSize="12sp"
+            android:text="ملف ترجمة"
+            android:contentDescription="اختر ملف ترجمة؛ يكتشف التطبيق اللغة ويترجمه إلى العربية أو يعرضه إذا كان عربيًا" />
 
         <Button
             android:id="@+id/savedItemsButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textSize="11sp"
-            android:text="محفوظاتي" />
+            android:layout_weight="0.85"
+            android:minHeight="54dp"
+            android:layout_marginStart="4dp"
+            android:textSize="12sp"
+            android:text="ملفاتي"
+            android:contentDescription="افتح ملفات الترجمة المحفوظة أو احذفها" />
 
     </LinearLayout>
 
@@ -133,6 +137,7 @@
         android:layout_height="0dp"
         android:visibility="gone">
 
+        <Button android:id="@+id/toggleOverlayButton" android:layout_width="1dp" android:layout_height="1dp" />
         <Button android:id="@+id/transcribeXAutoButton" android:layout_width="1dp" android:layout_height="1dp" />
         <Button android:id="@+id/testCaptureButton" android:layout_width="1dp" android:layout_height="1dp" />
         <Button android:id="@+id/transcribeAudioButton" android:layout_width="1dp" android:layout_height="1dp" />

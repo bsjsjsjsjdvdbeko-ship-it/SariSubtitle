@@ -150,8 +150,24 @@ class SariSubtitleActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.loadButton).setOnClickListener {
-            val url = urlInput.text.toString().trim()
-            if (url.isNotEmpty()) webView.loadUrl(url)
+            val typed = urlInput.text.toString().trim()
+            if (typed.isNotEmpty()) {
+                webView.loadUrl(typed)
+            } else {
+                val clipboardUrl = try {
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val text = if (clipboard.hasPrimaryClip() && (clipboard.primaryClip?.itemCount ?: 0) > 0)
+                        clipboard.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty() else ""
+                    Regex("https?://[^\\s<>\"']+", RegexOption.IGNORE_CASE).find(text)
+                        ?.value?.trimEnd('.', ',', ')', ']', '}', '،').orEmpty()
+                } catch (_: Exception) { "" }
+                if (clipboardUrl.isNotBlank()) {
+                    urlInput.setText(clipboardUrl)
+                    webView.loadUrl(clipboardUrl)
+                } else {
+                    Toast.makeText(this, "ألصق رابط الفيديو أولًا، أو اضغط ابدأ تلقائيًا لاستخدام الرابط المنسوخ", Toast.LENGTH_LONG).show()
+                }
+            }
         }
 
         findViewById<Button>(R.id.generateSrtFromLinkButton).setOnClickListener {
@@ -219,8 +235,9 @@ class SariSubtitleActivity : AppCompatActivity() {
             pollCurrentTimeOnce()
         }
 
+        // الإجراء الرئيسي: نفّذ أفضل مسار تلقائيًا بدل فتح قائمة خيارات.
         findViewById<Button>(R.id.menuButton).setOnClickListener {
-            showBottomSheet()
+            startAutomaticLinkFlow()
         }
 
         // واجهة المستخدم الرئيسية تعرض الوظائف الأساسية فقط؛ المحفوظات لا تحتاج إعادة تفريغ.
@@ -244,6 +261,7 @@ class SariSubtitleActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.loadSrtButton).setOnClickListener {
+            // سير ملف واحد: يكتشف اللغة؛ إن كان عربيًا يعرضه، وإلا يترجمه للعربية تلقائيًا.
             openSrtPicker()
         }
 
@@ -897,24 +915,98 @@ class SariSubtitleActivity : AppCompatActivity() {
         }
     }
 
+    /** A single entry point for subtitle files: translate or display, with no provider settings. */
+    private fun showSubtitleFileActions() {
+        val actions = arrayOf("ترجمة الملف إلى العربية تلقائيًا", "عرض ملف الترجمة على الفيديو")
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("ماذا تريد أن تفعل؟")
+            .setItems(actions) { _, which ->
+                when (which) {
+                    0 -> {
+                        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            setType("*/*")
+                        }
+                        startActivityForResult(
+                            Intent.createChooser(intent, "اختر ملف SRT للترجمة"),
+                            REQ_PICK_SRT_TO_TRANSLATE
+                        )
+                    }
+                    1 -> openSrtPicker()
+                }
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
     private fun openSrtPicker() {
-        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             setType("*/*")
         }
         try {
             startActivityForResult(
-                Intent.createChooser(intent, "اختر ملف SRT"),
+                Intent.createChooser(intent, "اختر ملف الترجمة (.srt)"),
                 REQ_PICK_SRT
             )
         } catch (e: Exception) {
-            Toast.makeText(this, "لا يوجد مدير ملفات", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "تعذّر فتح مدير الملفات", Toast.LENGTH_SHORT).show()
         }
     }
 
     /**
-     * ترجمة SRT تلقائية: يكتشف اللغة ثم يترجم إلى العربية.
-     * لا حوارات — المستخدم اختار الملف فقط.
+     * سير تلقائي لملف SRT:
+     * - يتحقق من صحة الملف.
+     * - إن كان عربيًا، يحمّله مباشرة للعرض.
+     * - إن كانت لغته مختلفة، يترجمه للعربية، ثم يعرضه ويطلب مكان حفظ نسخة قابلة للمشاركة.
+     */
+    private fun processSmartSrt(uri: Uri) {
+        val raw = try {
+            contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+        } catch (_: Exception) { null }
+        if (raw.isNullOrBlank()) {
+            Toast.makeText(this, "تعذّر قراءة الملف. اختر ملف SRT صالحًا.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val cues = try { SrtParser.parse(raw.byteInputStream(Charsets.UTF_8)) }
+        catch (_: Exception) { emptyList() }
+        if (cues.isEmpty()) {
+            Toast.makeText(this, "هذا الملف لا يحتوي على مقاطع SRT صالحة.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val firstText = cues.firstOrNull { it.text.isNotBlank() }?.text.orEmpty()
+        // Arabic script can be detected locally without network access.
+        val hasArabicScript = Regex("[\\u0600-\\u06FF\\u0750-\\u077F\\u08A0-\\u08FF]").containsMatchIn(firstText)
+        if (hasArabicScript) {
+            repo.setCues(cues)
+            lastSrtText = raw
+            lastSrtUrl = webView.url?.takeIf { it.startsWith("http") }
+            overlayOn = true
+            if (!lastSrtUrl.isNullOrBlank()) storage.save(lastSrtUrl!!, raw, cues.size)
+            val sourceName = getSrtDisplayName(uri).ifBlank { "ترجمة مستوردة.srt" }
+            storage.saveLibraryItem(sourceName, raw, cues.size)
+            statusText.visibility = android.view.View.VISIBLE
+            statusText.text = "تم تحميل الترجمة العربية: ${cues.size} مقطع. حُفظت في ملفاتي مع التوقيتات الأصلية."
+            Toast.makeText(this, "تم تحميل الترجمة وحفظها في ملفاتي", Toast.LENGTH_SHORT).show()
+            pollCurrentTimeOnce()
+        } else {
+            statusText.visibility = android.view.View.VISIBLE
+            statusText.text = "تم اختيار ملف الترجمة. جارٍ تحديد اللغة وترجمته للعربية…"
+            processTranslateSrt(uri)
+        }
+    }
+
+    private fun getSrtDisplayName(uri: Uri): String {
+        return try {
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0).orEmpty() else ""
+            }.orEmpty().ifBlank { uri.lastPathSegment.orEmpty().substringAfterLast('/') }
+        } catch (_: Exception) { uri.lastPathSegment.orEmpty().substringAfterLast('/') }
+    }
+
+    /**
+     * ترجمة SRT تلقائية: يكتشف اللغة، يحفظ الناتج داخل مكتبة التطبيق، ويعرضه فورًا.
+     * تصدير نسخة إلى مجلد الهاتف اختياري بعد اكتمال العملية، وليس خطوة إلزامية.
      */
     private fun processTranslateSrt(uri: Uri) {
         val raw = try {
@@ -926,12 +1018,21 @@ class SariSubtitleActivity : AppCompatActivity() {
             return
         }
 
+        val cancelRequested = java.util.concurrent.atomic.AtomicBoolean(false)
         val progress = ProgressDialog(this).apply {
-            setTitle("ترجمة SRT تلقائياً")
+            setTitle("ترجمة ملف الترجمة")
             setMessage("جارٍ اكتشاف اللغة…")
             setProgressStyle(ProgressDialog.STYLE_SPINNER)
             setCancelable(false)
+            setButton(ProgressDialog.BUTTON_NEGATIVE, "إلغاء", null)
             show()
+        }
+        // Override the default button dismissal so the user can see that the current
+        // network request may need to finish before cancellation takes effect.
+        progress.getButton(ProgressDialog.BUTTON_NEGATIVE)?.setOnClickListener {
+            cancelRequested.set(true)
+            progress.getButton(ProgressDialog.BUTTON_NEGATIVE)?.isEnabled = false
+            progress.setMessage("جارٍ الإيقاف بعد انتهاء طلب الترجمة الجاري…")
         }
 
         Thread {
@@ -940,34 +1041,75 @@ class SariSubtitleActivity : AppCompatActivity() {
                     source = raw,
                     targetLang = "ar",
                     onDetected = { lang ->
-                        runOnUiThread { progress.setMessage("🌐 اللغة المكتشفة: $lang\nجارٍ الترجمة…") }
+                        runOnUiThread { if (!cancelRequested.get()) progress.setMessage("اللغة المكتشفة: $lang\nجارٍ الترجمة إلى العربية…") }
                     },
-                    context = applicationContext
-                ) { done, total ->
-                    runOnUiThread { progress.setMessage("جارٍ ترجمة المقاطع: $done / $total") }
-                }
+                    context = applicationContext,
+                    onProgress = { done, total ->
+                        runOnUiThread { if (!cancelRequested.get()) progress.setMessage("جارٍ ترجمة المقاطع: $done / $total") }
+                    },
+                    shouldCancel = { cancelRequested.get() }
+                )
+                if (cancelRequested.get()) throw java.util.concurrent.CancellationException("ألغى المستخدم العملية")
 
                 pendingTranslatedSrt = translated
                 pendingTargetLang = "ar"
+                val translatedCues = SrtParser.parse(translated.byteInputStream(Charsets.UTF_8))
+                if (translatedCues.isEmpty()) throw IllegalStateException("لم ينتج ملف SRT صالح بعد الترجمة")
 
                 runOnUiThread {
                     progress.dismiss()
-                    Toast.makeText(this, "✅ تمت الترجمة — اختر مكان الحفظ", Toast.LENGTH_SHORT).show()
-                    val create = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        setType("application/x-subrip")
-                        putExtra(Intent.EXTRA_TITLE, "translated_ar_${System.currentTimeMillis()}.srt")
+                    repo.setCues(translatedCues)
+                    lastSrtText = translated
+                    overlayOn = true
+                    val currentUrl = webView.url?.takeIf { it.startsWith("http") }
+                        ?: urlInput.text.toString().trim().takeIf { it.startsWith("http") }
+                    if (!currentUrl.isNullOrBlank()) {
+                        storage.save(currentUrl, translated, translatedCues.size)
+                        lastSrtUrl = currentUrl
                     }
-                    startActivityForResult(create, REQ_SAVE_TRANSLATED_SRT)
+                    val originalName = getSrtDisplayName(uri).ifBlank { "subtitle.srt" }
+                    val translatedName = "ar_${originalName.substringAfterLast('/').removeSuffix(".srt").removeSuffix(".SRT")}.srt"
+                    val libraryId = storage.saveLibraryItem(translatedName, translated, translatedCues.size)
+                    if (libraryId == null) android.util.Log.w("SariSrt", "Could not persist translated SRT in local library")
+                    statusText.visibility = android.view.View.VISIBLE
+                    statusText.text = "اكتملت الترجمة العربية: ${translatedCues.size} مقطع. حُفظت في ملفاتي والتوقيتات محفوظة."
+                    pollCurrentTimeOnce()
+                    Toast.makeText(this, "اكتملت الترجمة وحُفظت تلقائيًا في ملفاتي", Toast.LENGTH_LONG).show()
+                    androidx.appcompat.app.AlertDialog.Builder(this)
+                        .setTitle("اكتملت الترجمة")
+                        .setMessage("تمت ترجمة ${translatedCues.size} مقطعًا، وحُفظ الملف داخل التطبيق. يمكنك فتحه لاحقًا من «ملفاتي». هل تريد أيضًا تصدير نسخة إلى مجلد الهاتف؟")
+                        .setNegativeButton("ليس الآن", null)
+                        .setPositiveButton("تصدير نسخة") { _, _ ->
+                            val create = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                setType("application/x-subrip")
+                                putExtra(Intent.EXTRA_TITLE, translatedName)
+                            }
+                            startActivityForResult(create, REQ_SAVE_TRANSLATED_SRT)
+                        }
+                        .show()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     progress.dismiss()
-                    androidx.appcompat.app.AlertDialog.Builder(this)
-                        .setTitle("تعذرت الترجمة")
-                        .setMessage("${e.message ?: "خطأ غير معروف"}\n\nتحقق من الإنترنت، ثم حاول مرة أخرى.")
-                        .setPositiveButton("حسنًا", null)
-                        .show()
+                    if (cancelRequested.get() || e is java.util.concurrent.CancellationException) {
+                        statusText.visibility = android.view.View.VISIBLE
+                        statusText.text = "أُلغيت ترجمة الملف. الملف الأصلي لم يتغير."
+                        Toast.makeText(this, "تم إلغاء الترجمة", Toast.LENGTH_SHORT).show()
+                    } else {
+                        val detail = when {
+                            e.message.orEmpty().contains("429") || e.message.orEmpty().contains("quota", true) || e.message.orEmpty().contains("rate limit", true) -> "يبدو أن حصة خدمة الترجمة انتهت أو أن الطلبات كثيرة. انتظر قليلًا ثم أعد المحاولة."
+                            e.message.orEmpty().contains("401") || e.message.orEmpty().contains("403") || e.message.orEmpty().contains("API key", true) || e.message.orEmpty().contains("مفتاح", true) -> "تعذّر التحقق من بيانات خدمة الترجمة. راجع إعدادات المفاتيح أو جرّب مزودًا متاحًا."
+                            e is java.net.SocketTimeoutException || e is java.net.UnknownHostException || e.message.orEmpty().contains("connect", true) || e.message.orEmpty().contains("network", true) -> "تعذّر الاتصال بخدمة الترجمة. افحص الإنترنت ثم أعد المحاولة."
+                            e.message.orEmpty().contains("SRT", true) || e.message.orEmpty().contains("مقاطع", true) -> "تعذّر قراءة بنية ملف SRT أو لم ينتج نص صالح. تأكد أن الملف يحتوي على التوقيتات والنصوص."
+                            else -> "تعذّرت الترجمة: ${e.message ?: "خطأ غير معروف"}. جرّب مرة أخرى أو تحقق من اتصال الإنترنت وإعدادات المزود."
+                        }
+                        androidx.appcompat.app.AlertDialog.Builder(this)
+                            .setTitle("تعذرت الترجمة")
+                            .setMessage(detail)
+                            .setPositiveButton("حسنًا", null)
+                            .show()
+                    }
                 }
             }
         }.start()
@@ -1521,48 +1663,72 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         throw IllegalStateException("فشلت محاولات التفريغ المتاحة: ${failures.joinToString(" | ")}")
     }
 
-    /** عرض مكتبة SRT المحلية، مع فتح الفيديو واستعادة ملفه دون استهلاك حصة API. */
+    /** مكتبة موحدة لملفات SRT المستقلة وترجمات الفيديو المحفوظة. */
     private fun showSavedSubtitles() {
-        val urls = storage.listUrls().distinct().sorted()
-        if (urls.isEmpty()) {
+        data class LibraryRow(val label: String, val url: String? = null, val item: SavedSrtItem? = null)
+        val rows = mutableListOf<LibraryRow>()
+        storage.listLibraryItems().forEach { item ->
+            rows += LibraryRow("📄 ${item.title}  •  ${item.cueCount} مقطع", item = item)
+        }
+        storage.listUrls().distinct().sorted().forEach { url ->
+            rows += LibraryRow("🎬 $url", url = url)
+        }
+        if (rows.isEmpty()) {
             androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle("محفوظاتي")
-                .setMessage("لا توجد ترجمات محفوظة بعد. بعد إنشاء SRT أو استيراده، سيحفظه التطبيق تلقائياً لهذا الرابط.")
-                .setPositiveButton("حسناً", null)
+                .setTitle("ملفاتي")
+                .setMessage("لا توجد ملفات محفوظة بعد. عند استيراد SRT أو ترجمته، سيحفظه التطبيق هنا تلقائيًا.")
+                .setPositiveButton("حسنًا", null)
                 .show()
             return
         }
-
         val list = ListView(this)
-        list.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, urls.mapIndexed { i, url -> "${i + 1}. $url" })
+        list.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, rows.mapIndexed { i, row -> "${i + 1}. ${row.label}" })
         val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("محفوظاتي (${urls.size}) — اضغط للفتح، واضغط مطولاً للحذف")
+            .setTitle("ملفاتي (${rows.size}) — اضغط للفتح، واضغط مطولًا للحذف")
             .setView(list)
             .setNegativeButton("إغلاق", null)
             .create()
-
         list.setOnItemClickListener { _, _, position, _ ->
-            val url = urls[position]
-            urlInput.setText(url)
-            webView.loadUrl(url)
-            val restored = restoreCachedSrt(url)
-            if (restored) {
-                Toast.makeText(this, "تم تحميل الترجمة المحفوظة دون إعادة المعالجة", Toast.LENGTH_LONG).show()
-                showStatus("تم استرجاع ${repo.size} مقطع محفوظ لهذا الفيديو؛ لم يتم استدعاء Groq أو Deepgram.")
+            val row = rows[position]
+            if (row.item != null) {
+                val srt = storage.loadLibraryItem(row.item.id)
+                if (srt.isNullOrBlank()) {
+                    Toast.makeText(this, "تعذّر فتح ملف الترجمة", Toast.LENGTH_LONG).show()
+                } else {
+                    val cues = try { SrtParser.parse(srt.byteInputStream(Charsets.UTF_8)) } catch (_: Exception) { emptyList() }
+                    if (cues.isEmpty()) Toast.makeText(this, "ملف SRT غير صالح", Toast.LENGTH_LONG).show()
+                    else {
+                        repo.setCues(cues)
+                        lastSrtText = srt
+                        lastSrtUrl = null
+                        overlayOn = true
+                        statusText.visibility = android.view.View.VISIBLE
+                        statusText.text = "تم فتح ${row.item.title}: ${cues.size} مقطع."
+                        pollCurrentTimeOnce()
+                        Toast.makeText(this, "تم تحميل الترجمة", Toast.LENGTH_SHORT).show()
+                    }
+                }
             } else {
-                Toast.makeText(this, "الرابط محفوظ لكن ملف SRT غير متاح؛ افتح الرابط للتحقق", Toast.LENGTH_LONG).show()
+                val url = row.url.orEmpty()
+                urlInput.setText(url)
+                webView.loadUrl(url)
+                if (restoreCachedSrt(url)) {
+                    Toast.makeText(this, "تم تحميل الترجمة المحفوظة دون إعادة المعالجة", Toast.LENGTH_LONG).show()
+                    showStatus("تم استرجاع ${repo.size} مقطع محفوظ لهذا الفيديو؛ لم يتم استدعاء مزود ترجمة.")
+                } else Toast.makeText(this, "الرابط محفوظ لكن ملف SRT غير متاح", Toast.LENGTH_LONG).show()
             }
             dialog.dismiss()
         }
         list.setOnItemLongClickListener { _, _, position, _ ->
-            val url = urls[position]
+            val row = rows[position]
+            val title = row.item?.title ?: row.url.orEmpty()
             androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle("حذف الترجمة المحفوظة؟")
-                .setMessage("سيُحذف ملف SRT المحلي المرتبط بهذا الرابط فقط. لن يُحذف الفيديو من الإنترنت.\n\n$url")
+                .setTitle("حذف من ملفاتي؟")
+                .setMessage("سيُحذف ملف SRT المحلي فقط.\n\n$title")
                 .setNegativeButton("إلغاء", null)
                 .setPositiveButton("حذف") { _, _ ->
-                    val deleted = storage.delete(url)
-                    Toast.makeText(this, if (deleted) "تم حذف SRT المحفوظ" else "تعذر حذف الملف", Toast.LENGTH_SHORT).show()
+                    val deleted = if (row.item != null) storage.deleteLibraryItem(row.item.id) else storage.delete(row.url.orEmpty())
+                    Toast.makeText(this, if (deleted) "تم الحذف" else "تعذر الحذف", Toast.LENGTH_SHORT).show()
                     dialog.dismiss()
                     showSavedSubtitles()
                 }
@@ -1572,154 +1738,87 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         dialog.show()
     }
 
-        private fun showBottomSheet() {
+    private fun showBottomSheet() {
         val sheet = BottomSheetDialog(this)
         val view = layoutInflater.inflate(R.layout.bottom_sheet_menu, null)
         sheet.setContentView(view)
 
-        // ربط كل زر داخل Bottom Sheet
-        view.findViewById<Button>(R.id.bsOpenChromeDownloaderButton)?.setOnClickListener {
-            sheet.dismiss()
-            openChromeForDownload()
-        }
-
+        // واجهة مبسطة: لا نعرض مزودات الترجمة أو أدوات التشخيص للمستخدم العادي.
         view.findViewById<Button>(R.id.bsOneTapArabicButton)?.setOnClickListener {
             sheet.dismiss()
-            oneTapArabic()
+            startAutomaticLinkFlow()
         }
-
-        view.findViewById<Button>(R.id.bsGenerateSrtButton)?.setOnClickListener {
-            sheet.dismiss()
-            findViewById<Button>(R.id.generateSrtFromLinkButton)?.performClick()
-        }
-
-        view.findViewById<Button>(R.id.bsTranscribeXButton)?.setOnClickListener {
-            sheet.dismiss()
-            findViewById<Button>(R.id.transcribeXAutoButton)?.performClick()
-        }
-
-        view.findViewById<Button>(R.id.bsOpenDownloaderButton)?.setOnClickListener {
-            sheet.dismiss()
-            val link = urlInput.text.toString().trim()
-            if (link.isNotEmpty() && link.startsWith("http")) {
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("Video URL", link))
-                Toast.makeText(this, "تم نسخ الرابط — الصقه في الموقع", Toast.LENGTH_LONG).show()
-            }
-            webView.loadUrl("https://ssstwitter.com/")
-        }
-
-        view.findViewById<Button>(R.id.bsTranscribeAudioButton)?.setOnClickListener {
-            sheet.dismiss()
-            findViewById<Button>(R.id.transcribeAudioButton)?.performClick()
-        }
-
-        view.findViewById<Button>(R.id.bsDirectMediaButton)?.setOnClickListener {
-            sheet.dismiss()
-            findViewById<Button>(R.id.transcribeDirectMediaUrlButton)?.performClick()
-        }
-
-        view.findViewById<Button>(R.id.bsImportSrtButton)?.setOnClickListener {
-            sheet.dismiss()
-            openSrtPicker()
-        }
-
-        view.findViewById<Button>(R.id.bsAnalyzeLinkButton)?.setOnClickListener {
-            sheet.dismiss()
-            findViewById<Button>(R.id.analyzeLinkButton)?.performClick()
-        }
-
-        view.findViewById<Button>(R.id.bsPasteSubWhisperButton)?.setOnClickListener {
-            sheet.dismiss()
-            findViewById<Button>(R.id.pasteLinkTranscribeButton)?.performClick()
-        }
-
-        view.findViewById<Button>(R.id.bsCopyLinkButton)?.setOnClickListener {
-            sheet.dismiss()
-            findViewById<Button>(R.id.copyLinkOnlyButton)?.performClick()
-        }
-
         view.findViewById<Button>(R.id.bsTranslateSrtButton)?.setOnClickListener {
             sheet.dismiss()
             findViewById<Button>(R.id.translateSrtButton)?.performClick()
         }
-
-        view.findViewById<Button>(R.id.bsOffsetMinus)?.setOnClickListener {
+        view.findViewById<Button>(R.id.bsImportSrtButton)?.setOnClickListener {
             sheet.dismiss()
-            findViewById<Button>(R.id.offsetMinusButton)?.performClick()
+            openSrtPicker()
         }
-
-        view.findViewById<Button>(R.id.bsOffsetPlus)?.setOnClickListener {
-            sheet.dismiss()
-            findViewById<Button>(R.id.offsetPlusButton)?.performClick()
-        }
-
-        view.findViewById<Button>(R.id.bsOffsetReset)?.setOnClickListener {
-            sheet.dismiss()
-            findViewById<Button>(R.id.offsetResetButton)?.performClick()
-        }
-
         sheet.show()
     }
 
-    private fun showStatus(text: String) {
-        statusText.text = text
-        statusText.visibility = android.view.View.VISIBLE
-        // إخفاء تلقائي بعد 3 ثوان (اختياري)
-    }
+    /**
+     * مسار مبسط للرابط الحالي:
+     * 1) يسترجع SRT المحفوظ إن وجد.
+     * 2) يحاول جلب ترجمة YouTube العامة تلقائياً عند توفرها.
+     * 3) يفتح مسار SubWhisper الداخلي للروابط الأخرى بدلاً من إجبار المستخدم على اختيار مزود.
+     * لا ندّعي أن كل منصة تسمح بالاستخراج التلقائي الكامل.
+     */
+    private fun startAutomaticLinkFlow() {
+        val typedLink = urlInput.text.toString().trim()
+        val pageLink = webView.url.orEmpty().trim()
+        val homeUrl = typedLink.equals("https://x.com/", ignoreCase = true) ||
+            typedLink.equals("https://x.com", ignoreCase = true) ||
+            typedLink.equals("https://www.x.com/", ignoreCase = true)
+        val pageIsHome = pageLink.equals("https://x.com/", ignoreCase = true) ||
+            pageLink.equals("https://x.com", ignoreCase = true) ||
+            pageLink.equals("https://www.x.com/", ignoreCase = true)
+        val clipboardUrl = try {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clipText = if (clipboard.hasPrimaryClip() && (clipboard.primaryClip?.itemCount ?: 0) > 0)
+                clipboard.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty() else ""
+            Regex("https?://[^\\s<>\"']+", RegexOption.IGNORE_CASE).find(clipText)
+                ?.value?.trimEnd('.', ',', ')', ']', '}', '،').orEmpty()
+        } catch (_: Exception) { "" }
+        val link = when {
+            typedLink.isNotBlank() && !homeUrl -> typedLink
+            pageLink.isNotBlank() && !pageIsHome -> pageLink
+            clipboardUrl.isNotBlank() -> clipboardUrl
+            else -> ""
+        }
+        val uri = try { Uri.parse(link) } catch (_: Exception) { null }
+        if (link.isBlank() || uri == null || uri.scheme !in listOf("http", "https") || uri.host.isNullOrBlank()) {
+            openPasteLinkFlow()
+            return
+        }
 
-    private fun downloadBlobViaJs(blobUrl: String, mimeType: String) {
-        Toast.makeText(this, "⬇️ تحميل blob…", Toast.LENGTH_SHORT).show()
-        val js = """
-            (async function() {
-              try {
-                var response = await fetch('$blobUrl');
-                var blob = await response.blob();
-                var reader = new FileReader();
-                return new Promise((resolve) => {
-                  reader.onload = () => resolve(JSON.stringify({
-                    data: reader.result.split(',')[1],
-                    type: blob.type || '$mimeType'
-                  }));
-                  reader.readAsDataURL(blob);
-                });
-              } catch(e) {
-                return JSON.stringify({error: String(e)});
-              }
-            })();
-        """.trimIndent()
-        webView.evaluateJavascript(js) { raw ->
-            val decoded = try {
-                org.json.JSONTokener(raw ?: "null").nextValue().toString()
-            } catch (_: Exception) { raw ?: "null" }
-            runOnUiThread {
-                try {
-                    val obj = org.json.JSONObject(decoded)
-                    if (obj.has("error")) {
-                        Toast.makeText(this, "❌ ${obj.getString("error")}", Toast.LENGTH_LONG).show()
-                        return@runOnUiThread
-                    }
-                    val b64 = obj.getString("data")
-                    val type = obj.optString("type", mimeType)
-                    val ext = when {
-                        type.contains("mp3") -> "mp3"
-                        type.contains("mp4") -> "mp4"
-                        type.contains("webm") -> "webm"
-                        type.contains("m4a") -> "m4a"
-                        else -> "bin"
-                    }
-                    val fileName = "sari_${System.currentTimeMillis()}.$ext"
-                    val file = java.io.File(Environment.getExternalStoragePublicDirectory(
-                        Environment.DIRECTORY_DOWNLOADS), fileName)
-                    val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                    file.writeBytes(bytes)
-                    Toast.makeText(this, "✅ حُفظ: $fileName (${bytes.size / 1024} KB)", Toast.LENGTH_LONG).show()
-                    statusText.text = "✅ $fileName — ${bytes.size / 1024} KB"
-                    statusText.visibility = android.view.View.VISIBLE
-                } catch (e: Exception) {
-                    Toast.makeText(this, "❌ ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
+        urlInput.setText(link)
+        if (restoreCachedSrt(link)) {
+            statusText.visibility = android.view.View.VISIBLE
+            statusText.text = "تم تحميل الترجمة المحفوظة لهذا الرابط تلقائياً."
+            Toast.makeText(this, "تم استرجاع الترجمة المحفوظة", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val youtubeId = YouTubeCaptionExtractor.getVideoId(link)
+        if (youtubeId != null) {
+            statusText.visibility = android.view.View.VISIBLE
+            statusText.text = "جارٍ البحث تلقائياً عن ترجمة عامة للفيديو…"
+            fetchYouTubeCaptions(link, "auto")
+            return
+        }
+
+        try {
+            statusText.visibility = android.view.View.VISIBLE
+            statusText.text = "جارٍ فتح مسار إنشاء الترجمة للرابط الحالي داخل التطبيق…"
+            val internalIntent = Intent(this, SubWhisperInternalActivity::class.java)
+                .putExtra(SubWhisperInternalActivity.EXTRA_INITIAL_URL, link)
+            startActivityForResult(internalIntent, REQ_SUBWHISPER_INTERNAL)
+        } catch (e: Exception) {
+            statusText.text = "تعذّر بدء الترجمة: ${e.message ?: "خطأ غير معروف"}"
+            Toast.makeText(this, statusText.text, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -1969,7 +2068,7 @@ private fun openAudioPicker() {
         }
         val uri = data?.data ?: return
         when (requestCode) {
-            REQ_PICK_SRT -> loadSrtFromUri(uri)
+            REQ_PICK_SRT -> processSmartSrt(uri)
             REQ_PICK_SRT_TO_TRANSLATE -> processTranslateSrt(uri)
             REQ_TRANSLATE_SRT_PICK -> translateSelectedSrt(uri)
             REQ_SAVE_TRANSLATED_SRT -> saveTranslatedSrt(uri)
