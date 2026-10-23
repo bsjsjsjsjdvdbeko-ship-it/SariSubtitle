@@ -74,6 +74,8 @@ class SariSubtitleActivity : AppCompatActivity() {
     private var pendingSourceLang = "en"
     private var pendingTargetLang = "ar"
     private var pendingTranslatedSrt: String? = null
+    /** URL requested by the one-tap workflow; capture begins after WebView loads it. */
+    private var pendingAutoCaptureUrl: String? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -110,6 +112,15 @@ class SariSubtitleActivity : AppCompatActivity() {
                 injectAutoShow()
                 // ⚡ محاولة استرجاع SRT لهذا URL
                 if (url != null) tryAutoLoadSrt(url)
+                val pending = pendingAutoCaptureUrl
+                if (!pending.isNullOrBlank() && !url.isNullOrBlank() && sameVideoUrl(pending, url)) {
+                    pendingAutoCaptureUrl = null
+                    handler.postDelayed({
+                        if (!isFinishing && webView.url?.let { sameVideoUrl(pending, it) } == true) {
+                            transcribeCurrentWebVideo()
+                        }
+                    }, 2200L)
+                }
             }
         }
         webView.webChromeClient = WebChromeClient()
@@ -235,9 +246,10 @@ class SariSubtitleActivity : AppCompatActivity() {
             pollCurrentTimeOnce()
         }
 
-        // الإجراء الرئيسي: نفّذ أفضل مسار تلقائيًا بدل فتح قائمة خيارات.
+        // الزر الرئيسي يحترم محرك المعالجة المختار في الإعدادات.
+        // المحرك الداخلي يترجم SRT داخل التطبيق ولا يفتح SubWhisper تلقائياً.
         findViewById<Button>(R.id.menuButton).setOnClickListener {
-            startAutomaticLinkFlow()
+            startPrimaryTranslationFlow()
         }
 
         // واجهة المستخدم الرئيسية تعرض الوظائف الأساسية فقط؛ المحفوظات لا تحتاج إعادة تفريغ.
@@ -680,6 +692,57 @@ class SariSubtitleActivity : AppCompatActivity() {
         }
     }
 
+    /** Translate a fetched/generated SRT to Arabic, preserve cue timestamps, show it, and cache it. */
+    private fun translateAndShowSrtAutomatically(videoUrl: String, sourceSrt: String, fileName: String) {
+        val progress = ProgressDialog(this).apply {
+            setTitle("الترجمة العربية")
+            setMessage("جارٍ اكتشاف اللغة ثم الترجمة باستخدام Gemini/المزوّد المتاح…")
+            setProgressStyle(ProgressDialog.STYLE_SPINNER)
+            setCancelable(false)
+            show()
+        }
+        Thread {
+            try {
+                val translated = SrtTranslationService.translateAuto(
+                    source = sourceSrt,
+                    targetLang = "ar",
+                    context = applicationContext,
+                    onDetected = { lang -> runOnUiThread { if (!isFinishing) progress.setMessage("لغة المصدر: $lang — جارٍ الترجمة إلى العربية…") } },
+                    onProgress = { done, total -> runOnUiThread { if (!isFinishing) progress.setMessage("جارٍ ترجمة المقاطع: $done / $total") } }
+                )
+                val cues = SrtParser.parse(translated.byteInputStream(Charsets.UTF_8))
+                if (cues.isEmpty()) throw IllegalStateException("لم ينتج ملف SRT صالح")
+                runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    progress.dismiss()
+                    repo.setCues(cues)
+                    lastSrtText = translated
+                    lastSrtUrl = videoUrl
+                    pendingWhisperSrt = translated
+                    storage.save(videoUrl, translated, cues.size)
+                    storage.saveLibraryItem("ar_${fileName.removeSuffix(".srt")}.srt", translated, cues.size)
+                    overlayOn = true
+                    statusText.visibility = android.view.View.VISIBLE
+                    statusText.text = "اكتملت الترجمة العربية: ${cues.size} مقطع. حُفظت لإعادة الاستخدام."
+                    pollCurrentTimeOnce()
+                    Toast.makeText(this, "اكتملت الترجمة العربية وحُفظت داخل التطبيق", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing) {
+                        progress.dismiss()
+                        statusText.text = "عُثر على SRT لكن تعذرت ترجمته تلقائياً: ${e.message ?: "خطأ غير معروف"}"
+                        androidx.appcompat.app.AlertDialog.Builder(this)
+                            .setTitle("تعذرت الترجمة العربية")
+                            .setMessage("حُفظت التوقيتات الأصلية، لكن الترجمة لم تكتمل. تحقق من مفتاح Gemini والإنترنت ثم أعد المحاولة.\n\n${e.message ?: "خطأ غير معروف"}")
+                            .setPositiveButton("حسنًا", null)
+                            .show()
+                    }
+                }
+            }
+        }.start()
+    }
+
     /** Extracts an existing public YouTube caption track without downloading the video. */
     private fun promptYouTubeCaptionExtraction(videoUrl: String) {
         val labels = arrayOf(
@@ -712,39 +775,23 @@ class SariSubtitleActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (isFinishing) return@runOnUiThread
                     progress.dismiss()
-                    pendingWhisperSrt = result.srt
-                    val cues = SrtParser.parse(result.srt.byteInputStream(Charsets.UTF_8))
-                    repo.setCues(cues)
-                    lastSrtText = result.srt
-                    lastSrtUrl = videoUrl
-                    storage.save(videoUrl, result.srt, cues.size)
-                    overlayOn = true
-                    statusText.text = "تم جلب ${result.cueCount} مقطع من ترجمة YouTube (${result.languageCode})"
-                    val generated = if (result.autoGenerated) "تلقائية" else "مضافة"
-                    androidx.appcompat.app.AlertDialog.Builder(this)
-                        .setTitle("تم إنشاء ملف SRT")
-                        .setMessage("تم جلب ${result.cueCount} مقطعاً باللغة ${result.languageCode}. نوع المسار: $generated. حُفظت نسخة داخل التطبيق لإعادة استخدامها. إذا أردت ترجمتها للعربية، استخدم زر ترجمة ملف SRT.")
-                        .setNegativeButton("إغلاق", null)
-                        .setPositiveButton("حفظ SRT") { _, _ ->
-                            val saveIntent2 = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                                addCategory(Intent.CATEGORY_OPENABLE)
-                                setType("application/x-subrip")
-                                putExtra(Intent.EXTRA_TITLE, "youtube-captions-${YouTubeCaptionExtractor.getVideoId(videoUrl)}.srt")
-                            }
-                            startActivityForResult(saveIntent2, REQ_SAVE_WHISPER_SRT)
-                        }
-                        .show()
+                    statusText.text = "عُثر على ${result.cueCount} مقطعاً (${result.languageCode}). جارٍ تجهيز الترجمة العربية…"
+                    translateAndShowSrtAutomatically(videoUrl, result.srt, "youtube-captions-${YouTubeCaptionExtractor.getVideoId(videoUrl)}.srt")
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     if (!isFinishing) {
                         progress.dismiss()
-                        statusText.text = "تعذر جلب ترجمة YouTube العامة"
-                        androidx.appcompat.app.AlertDialog.Builder(this)
-                            .setTitle("لم تتوفر ترجمة قابلة للجلب")
-                            .setMessage((e.message ?: "خطأ غير معروف") + "\n\nلم يتم تنزيل الفيديو. يمكنك تجربة زر «رابط مباشر للصوت/الفيديو ← إنشاء SRT» إذا كان لديك رابط ملف مباشر يمكن الوصول إليه، أو استيراد ملف SRT جاهز. لا يضمن هذا التطبيق استخراج الصوت من كل رابط اجتماعي.")
-                            .setPositiveButton("حسناً", null)
-                            .show()
+                        statusText.text = "لم توجد ترجمة جاهزة قابلة للجلب. جارٍ تجربة استخراج الصوت…"
+                        // Fallback: load the video in Sari's WebView and attempt captureStream.
+                        if (!sameVideoUrl(videoUrl, webView.url.orEmpty())) {
+                            pendingAutoCaptureUrl = videoUrl
+                            webView.loadUrl(videoUrl)
+                        } else {
+                            pendingAutoCaptureUrl = null
+                            handler.postDelayed({ if (!isFinishing) transcribeCurrentWebVideo() }, 700L)
+                        }
+                        android.util.Log.i("SariAutoFlow", "YouTube caption lookup failed; trying audio capture: ${e.message}")
                     }
                 }
             }
@@ -1505,8 +1552,15 @@ class SariSubtitleActivity : AppCompatActivity() {
                                     runOnUiThread {
                                         progress2.dismiss()
                                         repo.setCues(translatedCues)
+                                        lastSrtText = translatedSrt
+                                        val videoUrlForCache = urlInput.text.toString().trim().ifBlank { webView.url.orEmpty() }
+                                        if (videoUrlForCache.startsWith("http")) {
+                                            lastSrtUrl = videoUrlForCache
+                                            storage.save(videoUrlForCache, translatedSrt, translatedCues.size)
+                                        }
+                                        storage.saveLibraryItem("ar_transcription_${System.currentTimeMillis()}.srt", translatedSrt, translatedCues.size)
                                         overlayOn = true
-                                        statusText.text = "✅ SRT عربي: ${translatedCues.size} مقطع"
+                                        statusText.text = "✅ SRT عربي: ${translatedCues.size} مقطع — تم الحفظ"
                                         statusText.visibility = android.view.View.VISIBLE
                                         
                                         // إعادة تحميل الفيديو
@@ -1541,8 +1595,15 @@ class SariSubtitleActivity : AppCompatActivity() {
                         } else {
                             // SRT عربي بالفعل
                             repo.setCues(cues)
+                            lastSrtText = result.srt
+                            val videoUrlForCache = urlInput.text.toString().trim().ifBlank { webView.url.orEmpty() }
+                            if (videoUrlForCache.startsWith("http")) {
+                                lastSrtUrl = videoUrlForCache
+                                storage.save(videoUrlForCache, result.srt, cues.size)
+                            }
+                            storage.saveLibraryItem("ar_transcription_${System.currentTimeMillis()}.srt", result.srt, cues.size)
                             overlayOn = true
-                            statusText.text = "✅ SRT عربي: ${cues.size} مقطع"
+                            statusText.text = "✅ SRT عربي: ${cues.size} مقطع — تم الحفظ"
                             statusText.visibility = android.view.View.VISIBLE
                             
                             val currentUrl = webView.url ?: urlInput.text.toString().trim()
@@ -1610,8 +1671,8 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
             VoskModelManager.isInstalled(applicationContext, VoskModelManager.ENGLISH)
         val cloudProviders = when (selected) {
             SubtitleSettings.STT_LOCAL -> emptyList()
-            // الوضع التلقائي لا يرسل الصوت إلى مزود قد يتطلب دفعاً؛ يجرب Groq ثم Deepgram.
-            SubtitleSettings.STT_AUTO -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
+            // المطلوب في الوضع التلقائي: Groq إن كان المفتاح صالحاً، ثم Vosk المحلي عند توفر النموذج.
+            SubtitleSettings.STT_AUTO -> listOf(SubtitleSettings.STT_GROQ)
             SubtitleSettings.STT_DEEPGRAM -> listOf(SubtitleSettings.STT_DEEPGRAM, SubtitleSettings.STT_GROQ)
             SubtitleSettings.STT_GROQ -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
             else -> listOf(SubtitleSettings.STT_OPENAI)
@@ -1746,7 +1807,7 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         // واجهة مبسطة: لا نعرض مزودات الترجمة أو أدوات التشخيص للمستخدم العادي.
         view.findViewById<Button>(R.id.bsOneTapArabicButton)?.setOnClickListener {
             sheet.dismiss()
-            startAutomaticLinkFlow()
+            startPrimaryTranslationFlow()
         }
         view.findViewById<Button>(R.id.bsTranslateSrtButton)?.setOnClickListener {
             sheet.dismiss()
@@ -1757,6 +1818,18 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
             openSrtPicker()
         }
         sheet.show()
+    }
+
+    /**
+     * Routes the main action according to the engine selected in Settings.
+     * Internal mode translates a user-selected SRT through the app's configured translator
+     * (for example Gemini). It must not silently open SubWhisper because URL-to-SRT
+     * transcription is not implemented by the internal engine yet.
+     */
+    private fun startPrimaryTranslationFlow() {
+        // زر واحد: استعادة محفوظ -> ترجمة YouTube إن كانت متاحة -> التقاط صوت الفيديو الحالي.
+        // لا يفتح SubWhisper تلقائياً في الوضع الداخلي.
+        startAutomaticLinkFlow()
     }
 
     /**
@@ -1805,21 +1878,36 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         val youtubeId = YouTubeCaptionExtractor.getVideoId(link)
         if (youtubeId != null) {
             statusText.visibility = android.view.View.VISIBLE
-            statusText.text = "جارٍ البحث تلقائياً عن ترجمة عامة للفيديو…"
+            statusText.text = "جارٍ البحث تلقائياً عن ترجمة جاهزة للفيديو…"
+            if (!sameVideoUrl(link, webView.url.orEmpty())) webView.loadUrl(link)
             fetchYouTubeCaptions(link, "auto")
             return
         }
 
-        try {
-            statusText.visibility = android.view.View.VISIBLE
-            statusText.text = "جارٍ فتح مسار إنشاء الترجمة للرابط الحالي داخل التطبيق…"
-            val internalIntent = Intent(this, SubWhisperInternalActivity::class.java)
-                .putExtra(SubWhisperInternalActivity.EXTRA_INITIAL_URL, link)
-            startActivityForResult(internalIntent, REQ_SUBWHISPER_INTERNAL)
-        } catch (e: Exception) {
-            statusText.text = "تعذّر بدء الترجمة: ${e.message ?: "خطأ غير معروف"}"
-            Toast.makeText(this, statusText.text, Toast.LENGTH_LONG).show()
+        statusText.visibility = android.view.View.VISIBLE
+        if (sameVideoUrl(link, webView.url.orEmpty())) {
+            statusText.text = "لم توجد ترجمة جاهزة. جارٍ محاولة التقاط صوت الفيديو وتفريغه…"
+            transcribeCurrentWebVideo()
+        } else {
+            // نحمّل الرابط داخل مشغّل Sari ثم نبدأ الالتقاط بعد اكتمال التحميل.
+            pendingAutoCaptureUrl = link
+            statusText.text = "لم توجد ترجمة جاهزة. جارٍ فتح الفيديو داخل Sari Subtitle ثم استخراج الصوت…"
+            webView.loadUrl(link)
         }
+    }
+
+    private fun sameVideoUrl(first: String, second: String): Boolean {
+        fun normalize(value: String): String {
+            return try {
+                val uri = Uri.parse(value.trim())
+                val host = uri.host?.lowercase(java.util.Locale.ROOT)?.removePrefix("www.")
+                    ?: return value.trim().trimEnd('/')
+                val path = uri.path.orEmpty().trimEnd('/')
+                val id = uri.getQueryParameter("v")
+                host + path + if (!id.isNullOrBlank()) "?v=$id" else ""
+            } catch (_: Exception) { value.trim().trimEnd('/') }
+        }
+        return normalize(first).equals(normalize(second), ignoreCase = true)
     }
 
     private fun openChromeForDownload() {
