@@ -1698,13 +1698,20 @@ class SariSubtitleActivity : AppCompatActivity() {
                                         repo.setCues(translatedCues)
                                         lastSrtText = translatedSrt
                                         val videoUrlForCache = urlInput.text.toString().trim().ifBlank { webView.url.orEmpty() }
-                                        if (videoUrlForCache.startsWith("http")) {
+                                        val cacheSaved = if (videoUrlForCache.startsWith("http")) {
                                             lastSrtUrl = videoUrlForCache
-                                            storage.save(videoUrlForCache, translatedSrt, translatedCues.size)
-                                        }
-                                        storage.saveLibraryItem("ar_transcription_${System.currentTimeMillis()}.srt", translatedSrt, translatedCues.size)
+                                            storage.save(videoUrlForCache, translatedSrt, translatedCues.size) != null
+                                        } else false
+                                        val librarySaved = storage.saveLibraryItem(
+                                            "ar_transcription_${System.currentTimeMillis()}.srt", translatedSrt, translatedCues.size
+                                        ) != null
                                         overlayOn = true
-                                        statusText.text = "✅ SRT عربي: ${translatedCues.size} مقطع — تم الحفظ"
+                                        statusText.text = when {
+                                            cacheSaved -> "✅ SRT عربي: ${translatedCues.size} مقطع — حُفظت الترجمة لاستعادتها تلقائيًا"
+                                            librarySaved && videoUrlForCache.startsWith("http") -> "⚠️ تمت الترجمة وحُفظ الملف في مكتبتي، لكن تعذّر حفظ ربطه بالفيديو؛ لن تُستعاد تلقائيًا لهذا الرابط."
+                                            librarySaved -> "⚠️ تمت الترجمة وحُفظ الملف في مكتبتي، لكن لم يُحدد رابط فيديو لربط الترجمة به."
+                                            else -> "⚠️ تمت الترجمة، لكن تعذّر تأكيد حفظها. صدّر ملف SRT الآن للاحتفاظ بنسخة."
+                                        }
                                         statusText.visibility = android.view.View.VISIBLE
                                         
                                         // إعادة تحميل الفيديو

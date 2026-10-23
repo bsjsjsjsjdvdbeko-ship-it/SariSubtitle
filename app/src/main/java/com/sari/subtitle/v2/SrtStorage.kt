@@ -89,20 +89,38 @@ class SrtStorage(private val context: Context) {
      */
     fun save(url: String, srtText: String, cueCount: Int): String? {
         return try {
+            val normalizedUrl = normalizeUrl(url)
+            if (normalizedUrl.isBlank() || srtText.isBlank()) return null
             val hash = hashUrl(url)
             val fileName = "$hash.srt"
             val file = File(dir, fileName)
-            file.writeText(srtText, Charsets.UTF_8)
+            val tempFile = File(dir, "$fileName.tmp")
+            tempFile.writeText(srtText, Charsets.UTF_8)
+            if (!tempFile.isFile || tempFile.length() <= 0L) {
+                tempFile.delete()
+                return null
+            }
+            if (file.exists() && !file.delete()) {
+                tempFile.delete()
+                return null
+            }
+            if (!tempFile.renameTo(file)) {
+                tempFile.copyTo(file, overwrite = true)
+                tempFile.delete()
+            }
+            if (!file.isFile || file.length() <= 0L) return null
 
-            // تحديث الفهرس
+            // Persist the index only after the SRT file has been written and verified.
             val index = readIndex()
             index.put(hash, JSONObject().apply {
-                put("url", url)
+                put("url", url.trim())
+                put("normalizedUrl", normalizedUrl)
+                put("canonicalKey", canonicalKey(url))
                 put("fileName", fileName)
                 put("cueCount", cueCount)
                 put("savedAt", System.currentTimeMillis())
             })
-            writeIndex(index)
+            if (!writeIndex(index)) return null
             fileName
         } catch (e: Exception) {
             null
@@ -183,21 +201,28 @@ class SrtStorage(private val context: Context) {
     /** Normalize common tracking/format differences so a reopened video can reuse its SRT. */
     private fun normalizeUrl(raw: String): String {
         return try {
-            val uri = Uri.parse(raw.trim())
-            val host = (uri.host ?: "").lowercase()
+            val cleaned = raw.trim().trimEnd('.', ',', ')', ']', '}', '،')
+            val uri = Uri.parse(cleaned)
+            var host = (uri.host ?: "").lowercase(java.util.Locale.ROOT)
+            if (host.startsWith("www.")) host = host.removePrefix("www.")
             val path = uri.path.orEmpty().trimEnd('/')
-            // X/Twitter URLs for the same status are equivalent across x.com/twitter.com and mobile paths.
-            val status = Regex("/(?:[^/]+/)?status/(\\d+)").find(path)?.groupValues?.getOrNull(1)
-            if ((host == "x.com" || host.endsWith(".x.com") || host == "twitter.com" || host.endsWith(".twitter.com")) && status != null) {
-                return "https://x.com/i/status/$status"
-            }
+
+            // X/Twitter: status ID is the stable identity; ignore scheme, username,
+            // www/mobile host and every query parameter such as ?s=20 or ?ref_src=.
+            val status = Regex("(?:^|/)status/(\\d+)(?:/|$)")
+                .find(path)?.groupValues?.getOrNull(1)
+            val isXHost = host == "x.com" || host.endsWith(".x.com") ||
+                host == "twitter.com" || host.endsWith(".twitter.com")
+            if (isXHost && status != null) return "x-status:$status"
+
             val youtubeId = when {
                 host == "youtu.be" -> path.removePrefix("/").substringBefore("/")
                 host.contains("youtube.com") && path == "/watch" -> uri.getQueryParameter("v").orEmpty()
                 host.contains("youtube.com") && path.startsWith("/shorts/") -> path.removePrefix("/shorts/").substringBefore("/")
                 else -> ""
             }
-            if (youtubeId.isNotBlank()) return "https://www.youtube.com/watch?v=$youtubeId"
+            if (youtubeId.isNotBlank()) return "youtube-id:$youtubeId"
+
             val allowed = uri.queryParameterNames.filterNot {
                 it.equals("si", true) || it.equals("feature", true) || it.startsWith("utm_", true) ||
                     it.equals("fbclid", true) || it.equals("gclid", true)
@@ -206,7 +231,7 @@ class SrtStorage(private val context: Context) {
                 java.net.URLEncoder.encode(k, "UTF-8") + "=" + java.net.URLEncoder.encode(v, "UTF-8")
             }
             buildString {
-                append(uri.scheme?.lowercase() ?: "https").append("://").append(host)
+                append(uri.scheme?.lowercase(java.util.Locale.ROOT) ?: "https").append("://").append(host)
                 if (uri.port != -1) append(":").append(uri.port)
                 append(path)
                 if (query.isNotBlank()) append("?").append(query)
@@ -220,13 +245,23 @@ class SrtStorage(private val context: Context) {
         val directHash = hashUrl(url)
         index.optJSONObject(directHash)?.let { return directHash to it }
         val normalized = normalizeUrl(url)
+        val canonical = canonicalKey(url)
         val keys = index.keys()
         while (keys.hasNext()) {
             val key = keys.next()
             val entry = index.optJSONObject(key) ?: continue
-            if (normalizeUrl(entry.optString("url")) == normalized) return key to entry
+            val storedCanonical = entry.optString("canonicalKey")
+            if (canonical.isNotBlank() && storedCanonical == canonical) return key to entry
+            val storedNormalized = entry.optString("normalizedUrl").ifBlank { normalizeUrl(entry.optString("url")) }
+            if (storedNormalized == normalized) return key to entry
         }
         return null
+    }
+
+    /** Stable key for platforms with a durable content ID (currently X/Twitter). */
+    private fun canonicalKey(raw: String): String {
+        val normalized = normalizeUrl(raw)
+        return if (normalized.startsWith("x-status:")) normalized else ""
     }
 
     private fun hashUrl(url: String): String {
@@ -235,7 +270,7 @@ class SrtStorage(private val context: Context) {
             val bytes = md.digest(normalizeUrl(url).toByteArray(Charsets.UTF_8))
             bytes.joinToString("") { "%02x".format(it) }.take(16)
         } catch (e: Exception) {
-            url.hashCode().toString()
+            normalizeUrl(url).hashCode().toString()
         }
     }
 
@@ -260,9 +295,22 @@ class SrtStorage(private val context: Context) {
         }
     }
 
-    private fun writeIndex(index: JSONObject) {
-        try {
-            indexFile.writeText(index.toString(2), Charsets.UTF_8)
-        } catch (e: Exception) {}
+    private fun writeIndex(index: JSONObject): Boolean {
+        return try {
+            val temp = File(dir, "index.json.tmp")
+            val content = index.toString(2)
+            temp.writeText(content, Charsets.UTF_8)
+            if (!temp.isFile || temp.length() <= 0L) {
+                temp.delete()
+                return false
+            }
+            // Write a complete temporary index first; replace the old index only after serialization.
+            if (!temp.renameTo(indexFile)) {
+                temp.copyTo(indexFile, overwrite = true)
+                temp.delete()
+            }
+            indexFile.isFile && indexFile.length() > 0L &&
+                runCatching { JSONObject(indexFile.readText(Charsets.UTF_8)).length() == index.length() }.getOrDefault(false)
+        } catch (_: Exception) { false }
     }
 }
