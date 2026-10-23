@@ -43,6 +43,7 @@ class SariSubtitleActivity : AppCompatActivity() {
 
     companion object {
         private const val REQ_PICK_AUDIO = 1004
+        private const val REQ_PICK_VIDEO_FOR_AUTO = 1005
         private const val REQ_SAVE_WHISPER_SRT = 1005
         private const val REQ_SUBWHISPER_INTERNAL = 1006
         private const val REQ_PICK_SRT = 1001
@@ -1292,7 +1293,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                 try {
                     val obj = org.json.JSONObject(decoded)
                     if (obj.has("error")) {
-                        Toast.makeText(this, "❌ ${obj.getString("error")}", Toast.LENGTH_LONG).show()
+                        showManualVideoFallback()
                         return@runOnUiThread
                     }
                     val canCapture = obj.optBoolean("canCapture", false)
@@ -1300,7 +1301,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                     val duration = obj.optDouble("duration", 0.0)
                     
                     if (!canCapture || !canRecord) {
-                        Toast.makeText(this, "❌ captureStream أو MediaRecorder غير متاح", Toast.LENGTH_LONG).show()
+                        showManualVideoFallback()
                         return@runOnUiThread
                     }
                     
@@ -1419,15 +1420,11 @@ class SariSubtitleActivity : AppCompatActivity() {
                 try {
                     val obj = org.json.JSONObject(decoded)
                     if (obj.has("error")) {
-                        val err = obj.getString("error")
-                        val details = if (obj.has("paused")) {
-                            "\n(muted=${obj.optBoolean("muted")}, audioTracks=${obj.optInt("audioTracks")}, chunks=${obj.optInt("chunksCount")})"
-                        } else ""
-                        Toast.makeText(this, "❌ $err$details", Toast.LENGTH_LONG).show()
+                        showManualVideoFallback()
                         return@runOnUiThread
                     }
                     if (!obj.has("audio")) {
-                        Toast.makeText(this, "❌ لم يُرجع الصوت", Toast.LENGTH_LONG).show()
+                        showManualVideoFallback()
                         return@runOnUiThread
                     }
                     val b64 = obj.getString("audio")
@@ -1443,6 +1440,139 @@ class SariSubtitleActivity : AppCompatActivity() {
         }
     }
     
+    /** When a platform blocks WebView audio capture, guide the user to download then select the media. */
+    private fun showManualVideoFallback() {
+        if (isFinishing) return
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("تعذّر استخراج الصوت")
+            .setMessage("لا يمكن استخراج الصوت من هذا الرابط. يرجى تحميل الفيديو أولاً باستخدام أداة التنزيل، ثم اختياره من هاتفك. بعد اختياره سيحاول التطبيق تفريغ الصوت ثم ترجمته إلى العربية تلقائياً.")
+            .setNegativeButton("إلغاء", null)
+            .setNeutralButton("اختيار فيديو من الهاتف") { _, _ -> openVideoPickerForAutoTranscription() }
+            .setPositiveButton("فتح أداة التنزيل") { _, _ -> openChromeForDownload() }
+            .show()
+    }
+
+    private fun openVideoPickerForAutoTranscription() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "video/*"
+        }
+        try {
+            startActivityForResult(Intent.createChooser(intent, "اختر الفيديو الذي حمّلته"), REQ_PICK_VIDEO_FOR_AUTO)
+        } catch (_: Exception) {
+            Toast.makeText(this, "تعذّر فتح مدير الملفات", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Transcribes a selected local video, extracts its audio track for cloud STT when possible,
+     * then automatically translates the generated SRT to Arabic and caches it. */
+    private fun transcribeDownloadedVideo(uri: Uri) {
+        if (!hasSelectedSttKey()) {
+            Toast.makeText(this, "أضف مفتاح Groq أو ثبّت نموذج Vosk المحلي من الإعدادات أولاً", Toast.LENGTH_LONG).show()
+            return
+        }
+        val progress = ProgressDialog(this).apply {
+            setTitle("إنشاء الترجمة العربية")
+            setMessage("جارٍ تجهيز الصوت من الفيديو…")
+            setProgressStyle(ProgressDialog.STYLE_SPINNER)
+            setCancelable(false)
+            show()
+        }
+        statusText.visibility = android.view.View.VISIBLE
+        statusText.text = "جارٍ تفريغ الفيديو المحلي ثم ترجمته إلى العربية…"
+        Thread {
+            var extractedAudio: java.io.File? = null
+            try {
+                val selectedIsLocal = settings.sttProvider == SubtitleSettings.STT_LOCAL
+                val cloudKeyAvailable = settings.groqApiKey.isNotBlank() || settings.deepgramApiKey.isNotBlank() || settings.openAiApiKey.isNotBlank()
+                val result = if (selectedIsLocal || !cloudKeyAvailable) {
+                    transcribeWithSelectedProvider(uri, "auto")
+                } else {
+                    try {
+                        extractedAudio = extractAudioTrackForCloud(uri)
+                        transcribeWithSelectedProvider(Uri.fromFile(extractedAudio!!), "auto")
+                    } catch (cloudPrepError: Exception) {
+                        val hasLocalModel = VoskModelManager.isInstalled(applicationContext, VoskModelManager.ARABIC) ||
+                            VoskModelManager.isInstalled(applicationContext, VoskModelManager.ENGLISH)
+                        if (!hasLocalModel) throw cloudPrepError
+                        runOnUiThread { if (!isFinishing) progress.setMessage("تعذّر تجهيز الصوت للخدمة السحابية؛ جارٍ تجربة Vosk المحلي…") }
+                        val local = OfflineVoskTranscriber(applicationContext).transcribe(uri, "auto") { message ->
+                            runOnUiThread { if (!isFinishing) progress.setMessage(message) }
+                        }
+                        SelectedTranscriptionResult(local.language, local.text, local.srt, local.segmentCount)
+                    }
+                }
+                val rawSrt = result.srt
+                if (SrtParser.parse(rawSrt.byteInputStream(Charsets.UTF_8)).isEmpty()) {
+                    throw IllegalStateException("لم ينتج التفريغ ملف SRT صالحاً")
+                }
+                runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    progress.setMessage("اكتمل التفريغ — جارٍ ترجمة SRT إلى العربية…")
+                    translateAndShowSrtAutomatically("local-video://${uri.lastPathSegment ?: System.currentTimeMillis()}", rawSrt, "downloaded-video-${System.currentTimeMillis()}.srt")
+                    progress.dismiss()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing) {
+                        progress.dismiss()
+                        androidx.appcompat.app.AlertDialog.Builder(this)
+                            .setTitle("تعذّر إنشاء الترجمة")
+                            .setMessage("${e.message ?: "حدث خطأ أثناء تفريغ الفيديو"}\n\nتأكد من أن الفيديو يحتوي على صوت، وأن مفتاح Groq صالح أو نموذج Vosk المناسب مثبت.")
+                            .setPositiveButton("اختيار ملف آخر") { _, _ -> openVideoPickerForAutoTranscription() }
+                            .setNegativeButton("إغلاق", null)
+                            .show()
+                    }
+                }
+            } finally {
+                extractedAudio?.delete()
+            }
+        }.start()
+    }
+
+    /** Remux the compressed audio track from a local video into an M4A container for cloud STT. */
+    private fun extractAudioTrackForCloud(uri: Uri): java.io.File {
+        val extractor = android.media.MediaExtractor()
+        val output = java.io.File.createTempFile("sari_audio_", ".m4a", cacheDir)
+        var muxer: android.media.MediaMuxer? = null
+        try {
+            extractor.setDataSource(this, uri, null)
+            var audioTrack = -1
+            for (i in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(android.media.MediaFormat.KEY_MIME).orEmpty()
+                if (mime.startsWith("audio/")) { audioTrack = i; break }
+            }
+            if (audioTrack < 0) throw IllegalArgumentException("لم يتم العثور على مسار صوت داخل الفيديو")
+            extractor.selectTrack(audioTrack)
+            muxer = android.media.MediaMuxer(output.absolutePath, android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            val muxerTrack = muxer.addTrack(extractor.getTrackFormat(audioTrack))
+            muxer.start()
+            val buffer = java.nio.ByteBuffer.allocate(1024 * 1024)
+            val info = android.media.MediaCodec.BufferInfo()
+            while (true) {
+                buffer.clear()
+                val size = extractor.readSampleData(buffer, 0)
+                if (size < 0) break
+                info.offset = 0
+                info.size = size
+                info.presentationTimeUs = extractor.sampleTime
+                info.flags = extractor.sampleFlags
+                muxer.writeSampleData(muxerTrack, buffer, info)
+                extractor.advance()
+            }
+            muxer.stop()
+            if (output.length() <= 0L) throw IllegalStateException("تعذّر استخراج الصوت من الفيديو")
+            return output
+        } catch (e: Exception) {
+            output.delete()
+            throw IllegalStateException("تعذّر تجهيز مسار الصوت لإرساله إلى Groq: ${e.message}", e)
+        } finally {
+            try { muxer?.release() } catch (_: Exception) {}
+            try { extractor.release() } catch (_: Exception) {}
+        }
+    }
+
     private fun sendToGroq(audioBytes: ByteArray) {
         if (!hasSelectedSttKey()) {
             Toast.makeText(this, "جهّز مزود التفريغ من الإعدادات (مفتاح API أو نموذج Vosk المحلي) أولاً", Toast.LENGTH_LONG).show()
@@ -1925,12 +2055,12 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
             // حدد Chrome تحديداً
             intent.setPackage("com.android.chrome")
             startActivity(intent)
-            Toast.makeText(this, "الصق الرابط في Chrome → حمّل MP3 → عُد للتطبيق", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "الصق الرابط في Chrome → حمّل الفيديو MP4 → عُد للتطبيق واختره", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             // إذا Chrome غير مثبت — استخدم أي متصفح
             try {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://ssstwitter.com/")))
-                Toast.makeText(this, "الصق الرابط → حمّل MP3 → عُد", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "الصق الرابط → حمّل الفيديو MP4 → عُد واختره", Toast.LENGTH_LONG).show()
             } catch (e2: Exception) {
                 Toast.makeText(this, "❌ لا يوجد متصفح: ${e.message}", Toast.LENGTH_LONG).show()
             }
@@ -1961,7 +2091,7 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://ssstwitter.com/"))
                     intent.setPackage("com.android.chrome")
                     startActivity(intent)
-                    Toast.makeText(this, "⬇️ حمّل MP3، ثم عُد للتطبيق", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "⬇️ حمّل الفيديو MP4، ثم عُد للتطبيق واختره", Toast.LENGTH_LONG).show()
                 } catch (e: Exception) {
                     try {
                         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://ssstwitter.com/")))
@@ -2161,6 +2291,7 @@ private fun openAudioPicker() {
             REQ_TRANSLATE_SRT_PICK -> translateSelectedSrt(uri)
             REQ_SAVE_TRANSLATED_SRT -> saveTranslatedSrt(uri)
             REQ_PICK_AUDIO -> transcribeAudioFile(uri)
+            REQ_PICK_VIDEO_FOR_AUTO -> transcribeDownloadedVideo(uri)
             REQ_SAVE_WHISPER_SRT -> saveWhisperSrt(uri)
         }
     }
