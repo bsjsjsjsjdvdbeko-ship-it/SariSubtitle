@@ -21,7 +21,17 @@ class OfflineVoskTranscriber(private val context: Context) {
 
     fun transcribe(uri: Uri, language: String, progress: (String) -> Unit = {}): Output {
         val modelDir = VoskModelManager.installedModel(context, language)
-            ?: throw IllegalStateException("لا يوجد نموذج Vosk محلي مثبت. افتح الإعدادات ثم نزّل النموذج العربي أو الإنجليزي أولاً.")
+            ?: run {
+                val arabicInstalled = VoskModelManager.isInstalled(context, VoskModelManager.ARABIC)
+                val englishInstalled = VoskModelManager.isInstalled(context, VoskModelManager.ENGLISH)
+                val detail = when {
+                    !arabicInstalled && !englishInstalled -> "لم يُعثر على ملفات النموذج في مجلد التطبيق. افتح الإعدادات وأعد تنزيل النموذج."
+                    language.trim().startsWith("en", ignoreCase = true) && !englishInstalled -> "النموذج الإنجليزي غير مثبت؛ المثبت حاليًا هو العربي فقط."
+                    language.trim().startsWith("ar", ignoreCase = true) && !arabicInstalled -> "النموذج العربي غير مثبت؛ المثبت حاليًا هو الإنجليزي فقط."
+                    else -> "النموذج المثبت لا يطابق لغة التفريغ المطلوبة."
+                }
+                throw IllegalStateException("Vosk المحلي: $detail")
+            }
         val words = mutableListOf<Word>()
         val fallbackSegments = mutableListOf<Pair<Double, String>>()
         var decodedSeconds = 0.0

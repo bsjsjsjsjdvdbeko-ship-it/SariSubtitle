@@ -34,9 +34,29 @@ object VoskModelManager {
     }
 
     fun installedModel(context: Context, language: String): File? {
-        // Never silently run an English model on Arabic speech (or vice versa).
-        val preferred = if (language.lowercase().startsWith("en")) ENGLISH else ARABIC
-        return if (isInstalled(context, preferred)) modelDirectory(context, preferred) else null
+        val lang = language.trim().lowercase(java.util.Locale.ROOT)
+        val arabicInstalled = isInstalled(context, ARABIC)
+        val englishInstalled = isInstalled(context, ENGLISH)
+
+        // Explicit language always prefers its matching model.
+        if (lang.startsWith("en")) {
+            return if (englishInstalled) modelDirectory(context, ENGLISH) else null
+        }
+        if (lang.startsWith("ar")) {
+            return if (arabicInstalled) modelDirectory(context, ARABIC) else null
+        }
+
+        // For auto/blank language, use the only installed model instead of
+        // assuming Arabic. This fixes the case where Settings reports the
+        // English model installed but the transcriber was looking only for Arabic.
+        // If both exist, keep Arabic as the deterministic default; callers that
+        // know the source language should pass "en" or "ar" explicitly.
+        return when {
+            arabicInstalled && !englishInstalled -> modelDirectory(context, ARABIC)
+            englishInstalled && !arabicInstalled -> modelDirectory(context, ENGLISH)
+            arabicInstalled && englishInstalled -> modelDirectory(context, ARABIC)
+            else -> null
+        }
     }
 
     /** Blocking; caller must run this off the main thread. Downloads and extracts atomically. */
