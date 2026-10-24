@@ -58,7 +58,7 @@ class SrtStorage(private val context: Context) {
                 val entry = index.optJSONObject(id) ?: continue
                 val fileName = entry.optString("fileName")
                 if (fileName.isBlank() || !File(dir, fileName).isFile) continue
-                items += SavedSrtItem(id, entry.optString("title", "ترجمة محفوظة.srt"), entry.optInt("cueCount"), entry.optLong("savedAt"), entry.optString("sourceUrl").takeIf { it.startsWith("http://") || it.startsWith("https://") })
+                items += SavedSrtItem(id, entry.optString("title", "ترجمة محفوظة.srt"), entry.optInt("cueCount"), entry.optLong("savedAt"), entry.optString("sourceUrl").takeIf { it.startsWith("http://") || it.startsWith("https://") || it.startsWith("content://") || it.startsWith("file://") })
             }
             items.sortedByDescending { it.savedAt }
         } catch (_: Exception) { emptyList() }

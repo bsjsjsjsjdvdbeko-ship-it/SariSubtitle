@@ -18,6 +18,11 @@
         android:theme="@style/Theme.SariSubtitle.Starting">
 
         <activity
+            android:name=".LocalMediaPlayerActivity"
+            android:exported="false"
+            android:screenOrientation="sensor" />
+
+        <activity
             android:name=".SubWhisperInternalActivity"
             android:exported="false"
             android:screenOrientation="portrait" />

@@ -215,9 +215,14 @@ class SariSubtitleActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.loadButton).setOnClickListener {
-            val typed = urlInput.text.toString().trim()
+            val typedRaw = urlInput.text.toString().trim()
+            val typed = normalizeNavigableUrl(typedRaw)
             if (typed.isNotEmpty()) {
-                webView.loadUrl(typed)
+                urlInput.setText(typed)
+                pendingAutoCaptureUrl = null
+                statusText.visibility = android.view.View.VISIBLE
+                statusText.text = "جارٍ فتح الرابط…"
+                webView.post { webView.loadUrl(typed) }
             } else {
                 val clipboardUrl = try {
                     val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -227,8 +232,13 @@ class SariSubtitleActivity : AppCompatActivity() {
                         ?.value?.trimEnd('.', ',', ')', ']', '}', '،').orEmpty()
                 } catch (_: Exception) { "" }
                 if (clipboardUrl.isNotBlank()) {
-                    urlInput.setText(clipboardUrl)
-                    webView.loadUrl(clipboardUrl)
+                    val normalizedClipboard = normalizeNavigableUrl(clipboardUrl)
+                    if (normalizedClipboard.isNotBlank()) {
+                        urlInput.setText(normalizedClipboard)
+                        statusText.visibility = android.view.View.VISIBLE
+                        statusText.text = "جارٍ فتح الرابط المنسوخ…"
+                        webView.post { webView.loadUrl(normalizedClipboard) }
+                    } else Toast.makeText(this, "الرابط المنسوخ غير صالح", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(this, "ألصق رابط الفيديو أولًا، أو اضغط ابدأ تلقائيًا لاستخدام الرابط المنسوخ", Toast.LENGTH_LONG).show()
                 }
@@ -811,7 +821,11 @@ class SariSubtitleActivity : AppCompatActivity() {
                     lastSrtUrl = videoUrl
                     pendingWhisperSrt = translated
                     storage.save(videoUrl, translated, cues.size)
-                    storage.saveLibraryItem("ar_${fileName.removeSuffix(".srt")}.srt", translated, cues.size, videoUrl)
+                    storage.saveLibraryItem(
+                        if (videoUrl.startsWith("content://") || videoUrl.startsWith("file://")) "${fileName.substringBeforeLast('.', fileName)} — ترجمة عربية.srt"
+                        else "ar_${fileName.removeSuffix(".srt")}.srt",
+                        translated, cues.size, videoUrl
+                    )
                     overlayOn = true
                     statusText.visibility = android.view.View.VISIBLE
                     statusText.text = "اكتملت الترجمة العربية: ${cues.size} مقطع. حُفظت لإعادة الاستخدام."
@@ -1652,7 +1666,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (isFinishing || cancellation.isCancelled()) { progress.dismiss(); Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
                     progress.setMessage("اكتمل التفريغ — جارٍ ترجمة SRT إلى العربية…")
-                    translateAndShowSrtAutomatically("local-media://${uri.lastPathSegment ?: System.currentTimeMillis()}", rawSrt, "downloaded-media-${System.currentTimeMillis()}.srt")
+                    translateAndShowSrtAutomatically(uri.toString(), rawSrt, queryDisplayName(uri) ?: "downloaded-media-${System.currentTimeMillis()}.srt")
                     progress.dismiss()
                 }
             } catch (e: Exception) {
@@ -2080,12 +2094,24 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                         overlayOn = true
                         statusText.visibility = android.view.View.VISIBLE
                         val sourceUrl = row.item.sourceUrl
-                        if (!sourceUrl.isNullOrBlank()) {
+                        if (!sourceUrl.isNullOrBlank() && (sourceUrl.startsWith("content://") || sourceUrl.startsWith("file://"))) {
+                            val intent = Intent(this, LocalMediaPlayerActivity::class.java).apply {
+                                data = Uri.parse(sourceUrl)
+                                putExtra(LocalMediaPlayerActivity.EXTRA_SRT, srt)
+                                putExtra(LocalMediaPlayerActivity.EXTRA_TITLE, row.item.title)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            try { startActivity(intent) } catch (e: Exception) {
+                                Toast.makeText(this, "تعذّر فتح الفيديو المحلي: ${e.message}", Toast.LENGTH_LONG).show()
+                            }
+                            statusText.text = "تم فتح ${row.item.title} في المشغّل الداخلي مع الترجمة."
+                        } else if (!sourceUrl.isNullOrBlank() && sourceUrl.startsWith("http", true)) {
                             urlInput.setText(sourceUrl)
-                            webView.loadUrl(sourceUrl)
+                            pendingAutoCaptureUrl = null
+                            webView.post { webView.loadUrl(sourceUrl) }
                             statusText.text = "تم فتح ${row.item.title} مع الترجمة المحفوظة (${cues.size} مقطع)."
                         } else {
-                            statusText.text = "تم فتح ${row.item.title}: ${cues.size} مقطع. لا يوجد رابط فيديو مرتبط بهذا الملف."
+                            statusText.text = "تم فتح ${row.item.title}: ${cues.size} مقطع. لا يوجد فيديو مرتبط بهذا الملف."
                         }
                         pollCurrentTimeOnce()
                         Toast.makeText(this, if (sourceUrl.isNullOrBlank()) "تم تحميل الترجمة" else "تم فتح الفيديو مع الترجمة المحفوظة", Toast.LENGTH_SHORT).show()
@@ -2093,9 +2119,16 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                 }
             } else {
                 val url = row.url.orEmpty()
-                urlInput.setText(url)
-                webView.loadUrl(url)
-                if (restoreCachedSrt(url)) {
+                val normalizedUrl = normalizeNavigableUrl(url)
+                if (normalizedUrl.isBlank()) {
+                    Toast.makeText(this, "الرابط المحفوظ غير صالح", Toast.LENGTH_SHORT).show()
+                    dialog.dismiss()
+                    return@setOnItemClickListener
+                }
+                urlInput.setText(normalizedUrl)
+                pendingAutoCaptureUrl = null
+                webView.post { webView.loadUrl(normalizedUrl) }
+                if (restoreCachedSrt(normalizedUrl)) {
                     Toast.makeText(this, "تم تحميل الترجمة المحفوظة دون إعادة المعالجة", Toast.LENGTH_LONG).show()
                     showStatus("تم استرجاع ${repo.size} مقطع محفوظ لهذا الفيديو؛ لم يتم استدعاء مزود ترجمة.")
                 } else Toast.makeText(this, "الرابط محفوظ لكن ملف SRT غير متاح", Toast.LENGTH_LONG).show()
@@ -2183,12 +2216,12 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
             Regex("https?://[^\\s<>\"']+", RegexOption.IGNORE_CASE).find(clipText)
                 ?.value?.trimEnd('.', ',', ')', ']', '}', '،').orEmpty()
         } catch (_: Exception) { "" }
-        val link = when {
+        val link = normalizeNavigableUrl(when {
             typedLink.isNotBlank() && !homeUrl -> typedLink
             pageLink.isNotBlank() && !pageIsHome -> pageLink
             clipboardUrl.isNotBlank() -> clipboardUrl
             else -> ""
-        }
+        })
         val uri = try { Uri.parse(link) } catch (_: Exception) { null }
         if (link.isBlank() || uri == null || uri.scheme !in listOf("http", "https") || uri.host.isNullOrBlank()) {
             if (settings.processingEngine == SubtitleSettings.ENGINE_INTERNAL) {
@@ -2232,6 +2265,17 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
             statusText.text = "لم توجد ترجمة جاهزة. جارٍ فتح الفيديو داخل Sari Subtitle ثم استخراج الصوت…"
             webView.loadUrl(link)
         }
+    }
+
+    /** Accepts pasted host/path URLs without a scheme and rejects non-web schemes. */
+    private fun normalizeNavigableUrl(raw: String): String {
+        val value = raw.trim()
+        if (value.isBlank()) return ""
+        val candidate = if (value.matches(Regex("""(?i)^(x\.com|www\.x\.com|twitter\.com|www\.twitter\.com|youtube\.com|www\.youtube\.com|youtu\.be)(/.*)?$"""))) "https://$value" else value
+        return try {
+            val uri = Uri.parse(candidate)
+            if (uri.scheme !in listOf("http", "https") || uri.host.isNullOrBlank()) "" else candidate
+        } catch (_: Exception) { "" }
     }
 
     private fun sameVideoUrl(first: String, second: String): Boolean {
@@ -2506,7 +2550,10 @@ private fun openAudioPicker() {
             REQ_TRANSLATE_SRT_PICK -> translateSelectedSrt(uri)
             REQ_SAVE_TRANSLATED_SRT -> saveTranslatedSrt(uri)
             REQ_PICK_AUDIO -> transcribeAudioFile(uri)
-            REQ_PICK_VIDEO_FOR_AUTO -> transcribeDownloadedVideo(uri)
+            REQ_PICK_VIDEO_FOR_AUTO -> {
+                try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
+                transcribeDownloadedVideo(uri)
+            }
             REQ_SAVE_WHISPER_SRT -> saveWhisperSrt(uri)
             REQ_SAVE_DUBBING_WAV -> exportDubbingWav(uri)
         }
@@ -2709,7 +2756,11 @@ private fun openAudioPicker() {
                         textToSpeech?.speak(cue.text, queueMode, params, "sari-dub-${cue.startMs}")
                     }
                 } else if (cue == null && lastDubbingCueStartMs != -1L) {
-                    textToSpeech?.stop()
+                    // In clarity-first mode, a short subtitle gap must not cut an Arabic
+                    // utterance mid-word. QUEUE_ADD serializes the next cue after it.
+                    if (settings.dubbingPreference == SubtitleSettings.DUBBING_SYNC) {
+                        textToSpeech?.stop()
+                    }
                     lastDubbingCueStartMs = -1L
                 }
             }
