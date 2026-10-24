@@ -2646,8 +2646,8 @@ private fun openAudioPicker() {
                 } else if (cue != null && cue.startMs != lastDubbingCueStartMs) {
                     lastDubbingCueStartMs = cue.startMs
                     if (ttsReady) {
-                        val durationSeconds = ((cue.endMs - cue.startMs).coerceAtLeast(500L)) / 1000.0
-                        val estimatedRate = (cue.text.length / (durationSeconds * 14.0)).toFloat().coerceIn(0.75f, 1.8f)
+                        val durationSeconds = ((cue.endMs - cue.startMs).coerceAtLeast(1L)) / 1000.0
+                        val estimatedRate = (cue.text.length / (durationSeconds * 14.0)).toFloat().coerceIn(1.0f, 2.2f)
                         android.util.Log.i("SariDubbing", "live cue=${cue.index} startMs=${cue.startMs} endMs=${cue.endMs} slotMs=${cue.endMs - cue.startMs} speechRate=$estimatedRate provider=Android-TTS")
                         textToSpeech?.setSpeechRate(estimatedRate)
                         val params = android.os.Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f) }
