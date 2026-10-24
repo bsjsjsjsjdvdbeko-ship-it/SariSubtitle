@@ -2,6 +2,7 @@ package com.sari.subtitle.v2
 
 import android.text.Html
 import android.content.Context
+import android.util.Log
 import java.security.MessageDigest
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -35,8 +36,9 @@ object SrtTranslationService {
         onProgress: (Int, Int) -> Unit = { _, _ -> }
     ): String {
         val normalized = source.removePrefix("\uFEFF").replace("\r\n", "\n").replace('\r', '\n')
-        val blocks = normalized.trim().split(Regex("\n[ \t]*\n"))
-        require(blocks.any { timestampPattern.containsMatchIn(it) }) { "الملف لا يحتوي على مقاطع SRT صالحة" }
+        // Vosk outputs may vary in blank-line formatting; identify cue boundaries by timestamps.
+        val blocks = splitSrtCuesByTimestamp(normalized)
+        require(blocks.isNotEmpty()) { "الملف لا يحتوي على مقاطع SRT صالحة" }
         val target = targetLang.lowercase().substringBefore('-')
         val arabicScript = Regex("[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]")
         val latinScript = Regex("[A-Za-z]")
@@ -86,22 +88,131 @@ object SrtTranslationService {
         for ((language, indexes) in grouped) {
             if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
             val subset = indexes.map { blocks[it] }.joinToString("\r\n\r\n") + "\r\n"
-            val translatedSubset = translateSrt(
-                source = subset,
-                sourceLang = language,
-                targetLang = targetLang,
-                context = context,
-                shouldCancel = shouldCancel,
-                onProgress = { done, _ -> onProgress((finished + done).coerceAtMost(totalForeign), totalForeign) }
-            )
-            val translatedBlocks = translatedSubset.trim().split(Regex("\n[ \t]*\n"))
-            if (translatedBlocks.size != indexes.size) throw IllegalStateException("تغيّر عدد مقاطع SRT أثناء الترجمة")
-            for ((localIndex, originalIndex) in indexes.withIndex()) output[originalIndex] = translatedBlocks[localIndex]
-            finished += indexes.size
-            onProgress(finished.coerceAtMost(totalForeign), totalForeign)
+            val translatedSubset = try {
+                translateSrt(
+                    source = subset,
+                    sourceLang = language,
+                    targetLang = targetLang,
+                    context = context,
+                    shouldCancel = shouldCancel,
+                    onProgress = { done, _ -> onProgress((finished + done).coerceAtMost(totalForeign), totalForeign) }
+                )
+            } catch (e: Exception) {
+                if (shouldCancel() || e is java.util.concurrent.CancellationException) {
+                    throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+                }
+                Log.e(TAG, "Bulk translation failed for language=$language cues=${indexes.size}; retrying cue-by-cue", e)
+                ""
+            }
+
+            // Match returned cues by their timestamp, not by list position/count.
+            // This prevents one missing/extra provider cue from shifting all following subtitles.
+            val returnedByTimestamp = mutableMapOf<String, MutableList<String>>()
+            for (translatedBlock in splitSrtCuesByTimestamp(translatedSubset)) {
+                val stamp = cueTimestamp(translatedBlock)
+                if (stamp != null) returnedByTimestamp.getOrPut(stamp) { mutableListOf() }.add(translatedBlock)
+            }
+            val returnedCount = returnedByTimestamp.values.sumOf { it.size }
+            if (returnedCount != indexes.size) {
+                Log.w(TAG, "Partial SRT response: language=$language expected=${indexes.size} returned=$returnedCount; preserving original timestamps and recovering missing cues individually")
+            }
+
+            for ((localIndex, originalIndex) in indexes.withIndex()) {
+                if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+                val originalBlock = blocks[originalIndex]
+                val stamp = cueTimestamp(originalBlock)
+                val candidates = if (stamp == null) null else returnedByTimestamp[stamp]
+                val matched = candidates?.removeAtOrNull(0)
+                var applied = false
+                if (matched != null && extractCueText(matched).isNotBlank()) {
+                    output[originalIndex] = replaceCueText(originalBlock, matched)
+                    applied = true
+                } else {
+                    // A missing/empty cue must not abort the file or alter any timestamp.
+                    // Retry just this cue once; if that also fails, keep its original text.
+                    try {
+                        val single = translateSrt(
+                            source = originalBlock,
+                            sourceLang = language,
+                            targetLang = targetLang,
+                            context = context,
+                            shouldCancel = shouldCancel
+                        )
+                        val recovered = splitSrtCuesByTimestamp(single).firstOrNull { cueTimestamp(it) == stamp }
+                        if (recovered != null && extractCueText(recovered).isNotBlank()) {
+                            output[originalIndex] = replaceCueText(originalBlock, recovered)
+                            applied = true
+                            Log.i(TAG, "Recovered missing cue: language=$language cue=${localIndex + 1} originalIndex=${originalIndex + 1}")
+                        }
+                    } catch (e: Exception) {
+                        if (shouldCancel() || e is java.util.concurrent.CancellationException) {
+                            throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+                        }
+                        Log.e(TAG, "Translation failed for cue ${localIndex + 1}/${indexes.size} (original cue ${originalIndex + 1}, language=$language); keeping original text", e)
+                    }
+                }
+                if (!applied) {
+                    Log.w(TAG, "Cue ${localIndex + 1}/${indexes.size} (original cue ${originalIndex + 1}, language=$language) was not translated; original text and timestamp preserved")
+                }
+                finished++
+                onProgress(finished.coerceAtMost(totalForeign), totalForeign)
+            }
+            val extras = returnedByTimestamp.values.sumOf { it.size }
+            if (extras > 0) Log.w(TAG, "Ignored $extras extra translated cue(s) for language=$language; original SRT timing was retained")
         }
         if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
         return output.joinToString("\r\n\r\n") + "\r\n"
+    }
+
+    private const val TAG = "SrtTranslationService"
+
+    /** Determine cue boundaries from timestamp lines rather than blank-line separators. */
+    private fun splitSrtCuesByTimestamp(source: String): List<String> {
+        val normalized = source.removePrefix("\uFEFF")
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+        val lines = normalized.lines()
+        val timeLines = lines.indices.filter { timestampPattern.containsMatchIn(lines[it]) }
+        if (timeLines.isEmpty()) return emptyList()
+        val starts = timeLines.map { timeIndex ->
+            if (timeIndex > 0 && lines[timeIndex - 1].trim().matches(Regex("\\d+"))) timeIndex - 1 else timeIndex
+        }
+        return starts.indices.map { index ->
+            val end = if (index + 1 < starts.size) starts[index + 1] else lines.size
+            lines.subList(starts[index], end).joinToString("\n").trim()
+        }.filter { timestampPattern.containsMatchIn(it) }
+    }
+
+    private fun cueTimestamp(block: String): String? = block
+        .replace("\r\n", "\n").replace('\r', '\n')
+        .lineSequence().firstOrNull { timestampPattern.containsMatchIn(it) }?.trim()
+
+    private fun extractCueText(block: String): String {
+        val lines = block.replace("\r\n", "\n").replace('\r', '\n').lines()
+        val ti = lines.indexOfFirst { timestampPattern.containsMatchIn(it) }
+        return if (ti < 0) "" else lines.drop(ti + 1).joinToString("\n").trim()
+    }
+
+    private fun <T> MutableList<T>.removeAtOrNull(index: Int): T? =
+        if (index in indices) removeAt(index) else null
+
+    /** Preserve the original cue index/timestamp and replace only its text. */
+    private fun replaceCueText(originalBlock: String, translatedBlock: String): String {
+        val originalLines = originalBlock.replace("\r\n", "\n").replace('\r', '\n').lines()
+        val translatedLines = translatedBlock.replace("\r\n", "\n").replace('\r', '\n').lines()
+        val originalTimeIndex = originalLines.indexOfFirst { timestampPattern.containsMatchIn(it) }
+        val translatedTimeIndex = translatedLines.indexOfFirst { timestampPattern.containsMatchIn(it) }
+        if (originalTimeIndex < 0 || translatedTimeIndex < 0) {
+            Log.w(TAG, "Could not locate cue timestamp while replacing translated text; keeping translated block")
+            return translatedBlock.trim()
+        }
+        val header = originalLines.take(originalTimeIndex + 1)
+        // Collapse blank lines inside one cue so they cannot look like cue boundaries.
+        val translatedText = translatedLines.drop(translatedTimeIndex + 1)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+            .trim()
+        return (header + translatedText).joinToString("\n")
     }
 
     fun translateSrt(
@@ -186,6 +297,7 @@ object SrtTranslationService {
                     GeminiTranslationService.translateBatch(batchTexts, sourceLang, targetLang, geminiKey)
                 } catch (e: Exception) {
                     if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+                    Log.e(TAG, "Gemini translation batch failed; trying configured fallback. source=$sourceLang target=$targetLang batchSize=${batchTexts.size}", e)
                     // Avoid repeatedly hitting an exhausted/invalid Gemini quota for every batch.
                     geminiAvailable = false
                     null
