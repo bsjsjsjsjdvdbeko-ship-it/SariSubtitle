@@ -7,7 +7,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 
-data class SavedSrtItem(val id: String, val title: String, val cueCount: Int, val savedAt: Long)
+data class SavedSrtItem(val id: String, val title: String, val cueCount: Int, val savedAt: Long, val sourceUrl: String? = null)
 
 /**
  * إدارة تخزين ملفات SRT محلياً، مع فهرس URL → ملف.
@@ -30,7 +30,7 @@ class SrtStorage(private val context: Context) {
     private val libraryIndexFile: File by lazy { File(dir, "library-index.json") }
 
     /** حفظ ملف SRT مستقل في مكتبة التطبيق حتى لو لم يكن مرتبطاً برابط فيديو. */
-    fun saveLibraryItem(title: String, srtText: String, cueCount: Int): String? {
+    fun saveLibraryItem(title: String, srtText: String, cueCount: Int, sourceUrl: String? = null): String? {
         return try {
             val id = UUID.randomUUID().toString()
             val fileName = "library_$id.srt"
@@ -41,6 +41,7 @@ class SrtStorage(private val context: Context) {
                 put("fileName", fileName)
                 put("cueCount", cueCount)
                 put("savedAt", System.currentTimeMillis())
+                put("sourceUrl", sourceUrl?.trim().orEmpty())
             })
             writeLibraryIndex(index)
             id
@@ -57,7 +58,7 @@ class SrtStorage(private val context: Context) {
                 val entry = index.optJSONObject(id) ?: continue
                 val fileName = entry.optString("fileName")
                 if (fileName.isBlank() || !File(dir, fileName).isFile) continue
-                items += SavedSrtItem(id, entry.optString("title", "ترجمة محفوظة.srt"), entry.optInt("cueCount"), entry.optLong("savedAt"))
+                items += SavedSrtItem(id, entry.optString("title", "ترجمة محفوظة.srt"), entry.optInt("cueCount"), entry.optLong("savedAt"), entry.optString("sourceUrl").takeIf { it.startsWith("http://") || it.startsWith("https://") })
             }
             items.sortedByDescending { it.savedAt }
         } catch (_: Exception) { emptyList() }

@@ -12,6 +12,7 @@ import java.nio.ByteOrder
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.UUID
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -34,17 +35,25 @@ object WavDubbingExporter {
         val label: String get() = cues.joinToString(",") { it.index.toString() }
     }
 
+    @Synchronized
     fun export(tts: TextToSpeech, cues: List<SubtitleCue>, cacheDir: File, output: OutputStream,
+               dubbingPreference: String = SubtitleSettings.DUBBING_CLARITY,
                onProgress: (Int, Int, String) -> Unit = { _, _, _ -> }) {
         require(cues.isNotEmpty()) { "لا توجد مقاطع SRT لتصدير الدبلجة" }
         val ordered = cues.filter { it.text.isNotBlank() && it.endMs > it.startMs }.sortedBy { it.startMs }
         require(ordered.isNotEmpty()) { "لا توجد مقاطع SRT صالحة للدبلجة" }
         val groups = mergeCloseCues(ordered)
         val lastEnd = ordered.maxOf { max(it.endMs, it.startMs + 1L) }
-        val first = File(cacheDir, "sari_dub_${System.currentTimeMillis()}_0.wav")
-        val raw = File(cacheDir, "sari_dub_${System.currentTimeMillis()}_timeline.pcm")
+        // A private, unique work directory prevents stale WAV/PCM files from a previous
+        // export being mistaken for the current run (including rapid repeated exports).
+        val workDir = File(cacheDir, "sari_dubbing_export_${UUID.randomUUID()}").apply {
+            check(mkdirs() || isDirectory) { "تعذر إنشاء مجلد مؤقت لتصدير الدبلجة" }
+        }
+        val first = File(workDir, "first.wav")
+        val raw = File(workDir, "timeline.pcm")
         var bytesPerFrame = 0
         try {
+            tts.stop()
             val firstGroup = groups.first()
             val firstSlot = availableSlot(groups, 0)
             val firstRate = rateFor(firstGroup.text, firstSlot)
@@ -62,7 +71,7 @@ object WavDubbingExporter {
 
             for ((i, group) in groups.withIndex()) {
                 val wav = if (i == 0) firstWav else {
-                    val cueFile = File(cacheDir, "sari_dub_${System.currentTimeMillis()}_$i.wav")
+                    val cueFile = File(workDir, "cue_$i.wav")
                     try {
                         val slot = availableSlot(groups, i)
                         val rate = rateFor(group.text, slot)
@@ -80,8 +89,17 @@ object WavDubbingExporter {
                 val generatedMs = wav.data.size * 1000.0 / bytesPerSecond
                 val allowedBytesLong = (slotMs * firstWav.sampleRate / 1000L) * bytesPerFrame
                 val allowedBytes = min(wav.data.size.toLong(), allowedBytesLong).toInt().coerceAtLeast(0)
-                val clipped = allowedBytes < wav.data.size
-                val playable = if (clipped) fadeOutTail(wav.data, allowedBytes, bytesPerFrame, firstWav.sampleRate) else wav.data
+                val wouldClip = allowedBytes < wav.data.size
+                val clipForSync = wouldClip && dubbingPreference == SubtitleSettings.DUBBING_SYNC
+                val playable = if (clipForSync) fadeOutTail(wav.data, allowedBytes, bytesPerFrame, firstWav.sampleRate) else wav.data
+                val clipped = clipForSync
+                if (wouldClip) {
+                    if (clipForSync) {
+                        Log.w(TAG, "تم قص المقطع ${group.label} بسبب تجاوز المدة: generatedMs=${generatedMs.toLong()} slotMs=$slotMs preference=sync")
+                    } else {
+                        Log.w(TAG, "المقطع ${group.label} أطول من المدة المتاحة؛ تم الاحتفاظ بالكلام كاملًا: generatedMs=${generatedMs.toLong()} slotMs=$slotMs preference=clarity mayOverlap=true")
+                    }
+                }
                 val offset = (group.startMs * firstWav.sampleRate / 1000L) * bytesPerFrame
                 val desiredEnd = offset + playable.size
                 if (desiredEnd > MAX_OUTPUT_BYTES) throw IllegalStateException("تجاوز ملف الدبلجة حد 512 ميجابايت عند المقاطع ${group.label}")
@@ -92,21 +110,36 @@ object WavDubbingExporter {
                 if (playable.isNotEmpty()) mixPcm16(raw, offset, playable, playable.size)
                 val playedMs = playable.size * 1000.0 / bytesPerSecond
                 val rate = rateFor(group.text, slotMs)
-                Log.i(TAG, "cues=${group.label} provider=Android-TTS rate=${"%.2f".format(rate)} maxRate=$MAX_SPEECH_RATE slotMs=$slotMs generatedTtsMs=${generatedMs.toLong()} placedMs=${playedMs.toLong()} clipped=${if (clipped) 1 else 0} fadeOutMs=${if (clipped) min(FADE_OUT_MS, slotMs).coerceAtLeast(0L) else 0L} merged=${group.cues.size} ${if (clipped) "TTS_CLIPPED_TO_SLOT" else if (generatedMs < slotMs) "SILENCE_RETAINED" else "OK"}")
+                Log.i(TAG, "cues=${group.label} provider=Android-TTS preference=$dubbingPreference rate=${"%.2f".format(rate)} maxRate=$MAX_SPEECH_RATE slotMs=$slotMs generatedTtsMs=${generatedMs.toLong()} placedMs=${playedMs.toLong()} exceeded=${if (wouldClip) 1 else 0} clipped=${if (clipped) 1 else 0} fadeOutMs=${if (clipped) min(FADE_OUT_MS, slotMs).coerceAtLeast(0L) else 0L} merged=${group.cues.size} ${if (clipped) "TTS_CLIPPED_TO_SLOT" else if (wouldClip) "FULL_SPEECH_PRESERVED_POSSIBLE_OVERLAP" else if (generatedMs < slotMs) "SILENCE_RETAINED" else "OK"}")
                 for (cue in group.cues) {
                     Log.i(TAG, "cue=${cue.index} group=${group.label} startMs=${cue.startMs} endMs=${cue.endMs} provider=Android-TTS rate=${"%.2f".format(rate)} merged=${group.cues.size} clipped=${if (clipped) 1 else 0}")
                 }
-                onProgress(i + 1, groups.size, "المقاطع ${group.label} — صوت ${playedMs.toLong()}ms / متاح ${slotMs}ms${if (clipped) " — قص ناعم" else ""}")
+                onProgress(i + 1, groups.size, "المقاطع ${group.label} — صوت ${playedMs.toLong()}ms / متاح ${slotMs}ms" + when {
+                    clipped -> " — قص ناعم حسب أفضلية التزامن"
+                    wouldClip -> " — حفظ الكلام كاملًا حسب أفضلية الوضوح"
+                    else -> ""
+                })
             }
 
-            val dataSize = raw.length().coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            val rawLength = raw.length()
+            require(rawLength > 0L && rawLength <= MAX_OUTPUT_BYTES && rawLength <= Int.MAX_VALUE.toLong()) {
+                "ملف الدبلجة المؤقت فارغ أو أكبر من الحد المسموح (bytes=$rawLength)"
+            }
+            // Detect a silent/empty PCM timeline before reporting success. This catches
+            // TTS engines that return a WAV container without producing actual samples.
+            if (!containsNonZeroPcm(raw)) {
+                throw IllegalStateException("ولّد محرك الصوت ملفًا صامتًا؛ لم يتم حفظ WAV فارغ. أعد المحاولة أو اختر صوت TTS عربيًا آخر.")
+            }
+            val dataSize = rawLength.toInt()
             output.write(makeWavHeader(firstWav.sampleRate, firstWav.channels, firstWav.bitsPerSample, dataSize))
             FileInputStream(raw).use { input -> input.copyTo(output, 64 * 1024) }
             output.flush()
+            Log.i(TAG, "export complete bytes=${dataSize + 44L} cues=${ordered.size} groups=${groups.size} preference=$dubbingPreference")
         } finally {
             tts.setSpeechRate(1.0f)
-            first.delete()
-            raw.delete()
+            tts.stop()
+            workDir.listFiles()?.forEach { it.delete() }
+            workDir.delete()
         }
     }
 
@@ -215,6 +248,17 @@ object WavDubbingExporter {
         }
         require(format >= 0 && channels > 0 && sampleRate > 0 && bits > 0 && data != null) { "WAV لا يحتوي على fmt/data صالحين: ${file.name}" }
         return WavData(sampleRate, channels, bits, format, data!!)
+    }
+
+    private fun containsNonZeroPcm(file: File): Boolean {
+        FileInputStream(file).use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) return false
+                for (i in 0 until count) if (buffer[i].toInt() != 0) return true
+            }
+        }
     }
 
     private fun mixPcm16(raw: File, offset: Long, incoming: ByteArray, length: Int) {

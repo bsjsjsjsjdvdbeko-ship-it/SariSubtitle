@@ -31,6 +31,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import androidx.webkit.WebViewFeature
 import org.json.JSONObject
@@ -90,6 +91,7 @@ class SariSubtitleActivity : AppCompatActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
@@ -126,15 +128,27 @@ class SariSubtitleActivity : AppCompatActivity() {
             loadWithOverviewMode = true
             useWideViewPort = true
             cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
-            userAgentString = "Mozilla/5.0 (Linux; Android 13; SM-G991B) " +
+            userAgentString = "Mozilla/5.0 (Linux; Android 13; SM-G998B) " +
                 "AppleWebKit/537.36 (KHTML, like Gecko) " +
                 "Chrome/120.0.0.0 Mobile Safari/537.36"
+        }
+        // Preserve X login sessions in the embedded WebView. Third-party cookies are
+        // needed by some identity/login flows; flush after navigation to persist changes.
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(webView, true)
         }
         WebView.setWebContentsDebuggingEnabled(true)
 
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                findViewById<android.view.View>(R.id.welcomePanel)?.visibility = android.view.View.GONE
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                try { CookieManager.getInstance().flush() } catch (_: Exception) { }
                 injectAutoShow()
                 // ⚡ محاولة استرجاع SRT لهذا URL
                 if (url != null) tryAutoLoadSrt(url)
@@ -183,6 +197,20 @@ class SariSubtitleActivity : AppCompatActivity() {
                 statusText.visibility = android.view.View.VISIBLE
             } catch (e: Exception) {
                 Toast.makeText(this, "❌ فشل التنزيل: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        findViewById<Button>(R.id.openExternalButton).setOnClickListener {
+            val link = urlInput.text.toString().trim().ifBlank { webView.url.orEmpty().trim() }
+            val uri = try { Uri.parse(link) } catch (_: Exception) { null }
+            if (uri == null || uri.scheme !in listOf("http", "https") || uri.host.isNullOrBlank()) {
+                Toast.makeText(this, "افتح رابط فيديو أولاً", Toast.LENGTH_SHORT).show()
+            } else {
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE))
+                } catch (e: Exception) {
+                    Toast.makeText(this, "تعذّر فتح المتصفح: ${e.message ?: "لا يوجد متصفح متاح"}", Toast.LENGTH_LONG).show()
+                }
             }
         }
 
@@ -275,6 +303,9 @@ class SariSubtitleActivity : AppCompatActivity() {
         // الزر الرئيسي يحترم محرك المعالجة المختار في الإعدادات.
         // المحرك الداخلي يترجم SRT داخل التطبيق ولا يفتح SubWhisper تلقائياً.
         findViewById<Button>(R.id.menuButton).setOnClickListener {
+            startPrimaryTranslationFlow()
+        }
+        findViewById<Button>(R.id.welcomeStartButton).setOnClickListener {
             startPrimaryTranslationFlow()
         }
 
@@ -780,7 +811,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                     lastSrtUrl = videoUrl
                     pendingWhisperSrt = translated
                     storage.save(videoUrl, translated, cues.size)
-                    storage.saveLibraryItem("ar_${fileName.removeSuffix(".srt")}.srt", translated, cues.size)
+                    storage.saveLibraryItem("ar_${fileName.removeSuffix(".srt")}.srt", translated, cues.size, videoUrl)
                     overlayOn = true
                     statusText.visibility = android.view.View.VISIBLE
                     statusText.text = "اكتملت الترجمة العربية: ${cues.size} مقطع. حُفظت لإعادة الاستخدام."
@@ -1115,7 +1146,7 @@ class SariSubtitleActivity : AppCompatActivity() {
             overlayOn = true
             if (!lastSrtUrl.isNullOrBlank()) storage.save(lastSrtUrl!!, raw, cues.size)
             val sourceName = getSrtDisplayName(uri).ifBlank { "ترجمة مستوردة.srt" }
-            storage.saveLibraryItem(sourceName, raw, cues.size)
+            storage.saveLibraryItem(sourceName, raw, cues.size, lastSrtUrl)
             statusText.visibility = android.view.View.VISIBLE
             statusText.text = "تم تحميل الترجمة العربية: ${cues.size} مقطع. حُفظت في ملفاتي مع التوقيتات الأصلية."
             Toast.makeText(this, "تم تحميل الترجمة وحفظها في ملفاتي", Toast.LENGTH_SHORT).show()
@@ -1207,7 +1238,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                     }
                     val originalName = getSrtDisplayName(uri).ifBlank { "subtitle.srt" }
                     val translatedName = "ar_${originalName.substringAfterLast('/').removeSuffix(".srt").removeSuffix(".SRT")}.srt"
-                    val libraryId = storage.saveLibraryItem(translatedName, translated, translatedCues.size)
+                    val libraryId = storage.saveLibraryItem(if (!currentUrl.isNullOrBlank()) videoHistoryTitle(currentUrl) else translatedName, translated, translatedCues.size, currentUrl)
                     if (libraryId == null) android.util.Log.w("SariSrt", "Could not persist translated SRT in local library")
                     statusText.visibility = android.view.View.VISIBLE
                     statusText.text = "اكتملت الترجمة العربية: ${translatedCues.size} مقطع. حُفظت في ملفاتي والتوقيتات محفوظة."
@@ -1827,7 +1858,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                                             storage.save(videoUrlForCache, translatedSrt, translatedCues.size) != null
                                         } else false
                                         val librarySaved = storage.saveLibraryItem(
-                                            "ar_transcription_${System.currentTimeMillis()}.srt", translatedSrt, translatedCues.size
+                                            videoHistoryTitle(videoUrlForCache), translatedSrt, translatedCues.size, videoUrlForCache.takeIf { it.startsWith("http") }
                                         ) != null
                                         overlayOn = true
                                         statusText.text = when {
@@ -1877,7 +1908,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                                 lastSrtUrl = videoUrlForCache
                                 storage.save(videoUrlForCache, result.srt, cues.size)
                             }
-                            storage.saveLibraryItem("ar_transcription_${System.currentTimeMillis()}.srt", result.srt, cues.size)
+                            storage.saveLibraryItem(videoHistoryTitle(videoUrlForCache), result.srt, cues.size, videoUrlForCache.takeIf { it.startsWith("http") })
                             overlayOn = true
                             statusText.text = "✅ SRT عربي: ${cues.size} مقطع — تم الحفظ"
                             statusText.visibility = android.view.View.VISIBLE
@@ -2000,15 +2031,23 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         throw IllegalStateException("فشلت محاولات التفريغ المتاحة: ${failures.joinToString(" | ")}")
     }
 
+    private fun videoHistoryTitle(url: String): String {
+        if (url.isBlank()) return "ترجمة محفوظة.srt"
+        val x = Regex("(?:x\\.com|twitter\\.com)/([^/?#]+)/status/(\\d+)", RegexOption.IGNORE_CASE).find(url)
+        if (x != null) return "${x.groupValues[1]} — منشور ${x.groupValues[2]}"
+        val host = try { android.net.Uri.parse(url).host.orEmpty().removePrefix("www.") } catch (_: Exception) { "" }
+        return if (host.isNotBlank()) "$host — ${url.takeLast(38)}" else url.take(70)
+    }
+
     /** مكتبة موحدة لملفات SRT المستقلة وترجمات الفيديو المحفوظة. */
     private fun showSavedSubtitles() {
         data class LibraryRow(val label: String, val url: String? = null, val item: SavedSrtItem? = null)
         val rows = mutableListOf<LibraryRow>()
         storage.listLibraryItems().forEach { item ->
-            rows += LibraryRow("📄 ${item.title}  •  ${item.cueCount} مقطع", item = item)
+            rows += LibraryRow("📄 ${item.title}  •  ${item.cueCount} مقطع" + (item.sourceUrl?.let { "\n🎬 ${it.take(76)}${if (it.length > 76) "…" else ""}" } ?: ""), url = item.sourceUrl, item = item)
         }
         storage.listUrls().distinct().sorted().forEach { url ->
-            rows += LibraryRow("🎬 $url", url = url)
+            rows += LibraryRow("🎬 ${videoHistoryTitle(url)}\n$url", url = url)
         }
         if (rows.isEmpty()) {
             androidx.appcompat.app.AlertDialog.Builder(this)
@@ -2037,12 +2076,19 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                     else {
                         repo.setCues(cues)
                         lastSrtText = srt
-                        lastSrtUrl = null
+                        lastSrtUrl = row.item.sourceUrl
                         overlayOn = true
                         statusText.visibility = android.view.View.VISIBLE
-                        statusText.text = "تم فتح ${row.item.title}: ${cues.size} مقطع."
+                        val sourceUrl = row.item.sourceUrl
+                        if (!sourceUrl.isNullOrBlank()) {
+                            urlInput.setText(sourceUrl)
+                            webView.loadUrl(sourceUrl)
+                            statusText.text = "تم فتح ${row.item.title} مع الترجمة المحفوظة (${cues.size} مقطع)."
+                        } else {
+                            statusText.text = "تم فتح ${row.item.title}: ${cues.size} مقطع. لا يوجد رابط فيديو مرتبط بهذا الملف."
+                        }
                         pollCurrentTimeOnce()
-                        Toast.makeText(this, "تم تحميل الترجمة", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, if (sourceUrl.isNullOrBlank()) "تم تحميل الترجمة" else "تم فتح الفيديو مع الترجمة المحفوظة", Toast.LENGTH_SHORT).show()
                     }
                 }
             } else {
@@ -2061,10 +2107,16 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
             val title = row.item?.title ?: row.url.orEmpty()
             androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("حذف من ملفاتي؟")
-                .setMessage("سيُحذف ملف SRT المحلي فقط.\n\n$title")
+                .setMessage("سيُحذف سجل الترجمة وملف SRT المرتبط به من التطبيق، ولن يُحذف الفيديو الأصلي.\n\n$title")
                 .setNegativeButton("إلغاء", null)
                 .setPositiveButton("حذف") { _, _ ->
-                    val deleted = if (row.item != null) storage.deleteLibraryItem(row.item.id) else storage.delete(row.url.orEmpty())
+                    val deleted = if (row.item != null) {
+                        val itemDeleted = storage.deleteLibraryItem(row.item.id)
+                        // Remove the URL cache entry too, so the same deleted translation does not
+                        // reappear as a URL-only history row. Other library SRT copies remain intact.
+                        if (!row.item.sourceUrl.isNullOrBlank()) storage.delete(row.item.sourceUrl)
+                        itemDeleted
+                    } else storage.delete(row.url.orEmpty())
                     Toast.makeText(this, if (deleted) "تم الحذف" else "تعذر الحذف", Toast.LENGTH_SHORT).show()
                     dialog.dismiss()
                     showSavedSubtitles()
@@ -2651,7 +2703,10 @@ private fun openAudioPicker() {
                         android.util.Log.i("SariDubbing", "live cue=${cue.index} startMs=${cue.startMs} endMs=${cue.endMs} slotMs=${cue.endMs - cue.startMs} speechRate=$estimatedRate provider=Android-TTS")
                         textToSpeech?.setSpeechRate(estimatedRate)
                         val params = android.os.Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f) }
-                        textToSpeech?.speak(cue.text, TextToSpeech.QUEUE_FLUSH, params, "sari-dub-${cue.startMs}")
+                        val clarityMode = settings.dubbingPreference != SubtitleSettings.DUBBING_SYNC
+                        val queueMode = if (clarityMode) TextToSpeech.QUEUE_ADD else TextToSpeech.QUEUE_FLUSH
+                        android.util.Log.i("SariDubbing", "cue=${cue.index} preference=${settings.dubbingPreference} queueMode=${if (clarityMode) "QUEUE_ADD" else "QUEUE_FLUSH"} speechRate=$estimatedRate")
+                        textToSpeech?.speak(cue.text, queueMode, params, "sari-dub-${cue.startMs}")
                     }
                 } else if (cue == null && lastDubbingCueStartMs != -1L) {
                     textToSpeech?.stop()
@@ -2733,6 +2788,7 @@ private fun openAudioPicker() {
                         cues = exportCues,
                         cacheDir = cacheDir,
                         output = stream,
+                        dubbingPreference = settings.dubbingPreference,
                         onProgress = { done, total, detail -> runOnUiThread {
                             if (!isFinishing) dialog.setMessage("توليد الدبلجة: $done / $total\n$detail")
                         } }

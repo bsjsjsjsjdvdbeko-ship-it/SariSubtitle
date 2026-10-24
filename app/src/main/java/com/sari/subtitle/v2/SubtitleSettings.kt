@@ -27,6 +27,8 @@ class SubtitleSettings(context: Context) {
         const val TRANSLATION_AUTO = "auto"
         const val TRANSLATION_GEMINI = "gemini"
         const val TRANSLATION_OMNIROUTE = "omniroute"
+        const val DUBBING_CLARITY = "clarity"
+        const val DUBBING_SYNC = "sync"
 
         val TEXT_SIZES = floatArrayOf(14f, 18f, 22f, 28f, 34f)
         val TEXT_SIZE_LABELS = arrayOf("صغير", "متوسط", "كبير", "كبير جداً", "ضخم")
@@ -114,6 +116,11 @@ class SubtitleSettings(context: Context) {
     var omniRouteEnabled: Boolean
         get() = prefs.getBoolean("omniroute_enabled", false)
         set(value) = prefs.edit().putBoolean("omniroute_enabled", value).apply()
+
+    /** Dubbing trade-off: clarity preserves complete words; sync clips to cue duration. */
+    var dubbingPreference: String
+        get() = prefs.getString("dubbing_preference", DUBBING_CLARITY) ?: DUBBING_CLARITY
+        set(value) = prefs.edit().putString("dubbing_preference", if (value == DUBBING_SYNC) DUBBING_SYNC else DUBBING_CLARITY).apply()
 
     var translationProvider: String
         get() = prefs.getString("translation_provider", TRANSLATION_AUTO) ?: TRANSLATION_AUTO

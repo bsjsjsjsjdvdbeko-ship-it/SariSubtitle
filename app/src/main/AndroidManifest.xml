@@ -15,7 +15,7 @@
         android:label="Sari Subtitle"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
-        android:theme="@style/Theme.SariSubtitle">
+        android:theme="@style/Theme.SariSubtitle.Starting">
 
         <activity
             android:name=".SubWhisperInternalActivity"

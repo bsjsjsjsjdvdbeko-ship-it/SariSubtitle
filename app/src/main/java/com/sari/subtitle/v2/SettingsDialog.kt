@@ -31,6 +31,24 @@ object SettingsDialog {
         // عنوان
         root.addView(makeTitle(context, "⚙️ إعدادات الترجمة"))
 
+        // تفضيل تزامن الدبلجة: الوضوح هو الافتراضي لتجنب قطع الكلمات.
+        root.addView(makeLabel(context, "تفضيل الدبلجة العربية"))
+        val dubbingPreferenceSpinner = android.widget.Spinner(context).apply {
+            adapter = android.widget.ArrayAdapter(
+                context,
+                android.R.layout.simple_spinner_dropdown_item,
+                arrayOf("أفضلية الوضوح — لا تقص الكلام", "أفضلية التزامن — قص ناعم عند الحاجة")
+            )
+            setSelection(if (settings.dubbingPreference == SubtitleSettings.DUBBING_SYNC) 1 else 0)
+        }
+        root.addView(dubbingPreferenceSpinner)
+        root.addView(TextView(context).apply {
+            text = "أفضلية الوضوح تسمح بتداخل صوتي بسيط لإكمال الكلمات. أفضلية التزامن تقص نهاية الصوت الزائد مع Fade Out لمنع التداخل."
+            textSize = 12f
+            setTextColor(Color.DKGRAY)
+            setPadding(0, 4, 0, 10)
+        })
+
         // مفاتيح الترجمة متاحة عند الحاجة فقط؛ لا نطلب من المستخدم اختيار المزود في كل مرة.
         root.addView(Button(context).apply {
             text = "إعداد مفاتيح الترجمة (اختياري)"
@@ -405,6 +423,11 @@ object SettingsDialog {
                         3 -> SubtitleSettings.STT_OPENAI
                         4 -> SubtitleSettings.STT_LOCAL
                         else -> SubtitleSettings.STT_GROQ
+                    }
+                    settings.dubbingPreference = if (dubbingPreferenceSpinner.selectedItemPosition == 1) {
+                        SubtitleSettings.DUBBING_SYNC
+                    } else {
+                        SubtitleSettings.DUBBING_CLARITY
                     }
                     overlay.applySettings(settings)
                     onSaved()
