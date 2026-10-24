@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    implementation("androidx.core:core-splashscreen:1.0.1")
 }
 
 android {
@@ -52,6 +53,7 @@ android {
         "src/main/java",
         "src/main/kotlin"
     )
+    implementation("androidx.core:core-splashscreen:1.0.1")
 }
 
 dependencies {
@@ -60,4 +62,5 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("com.alphacephei:vosk-android:0.3.47")
+    implementation("androidx.core:core-splashscreen:1.0.1")
 }
