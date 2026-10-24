@@ -25,7 +25,7 @@ object TranslationProvidersDialog {
             textSize = 21f; setTextColor(Color.BLACK); gravity = Gravity.START
         })
         root.addView(TextView(context).apply {
-            text = "اختر المزود الأساسي. يجرب التطبيق Gemini أولًا، ثم OmniRoute عند تفعيل البديل وفشل Gemini، ثم بقية المزودات المتاحة. اترك حقول المفاتيح فارغة للاحتفاظ بالقيم المحفوظة."
+            text = "اختر المزود الأساسي: عند اختيار OmniRoute أولاً يبدأ به التطبيق؛ وعند تفعيله كبديل يبدأ بـ Gemini ثم يجرب OmniRoute عند فشل Gemini. بعدهما تُجرّب بدائل الترجمة النصية المتاحة. Vosk للتفريغ الصوتي فقط وليس مزود ترجمة. اترك حقول المفاتيح فارغة للاحتفاظ بالقيم المحفوظة."
             textSize = 13f; setTextColor(Color.DKGRAY); setPadding(0, 8, 0, 12)
         })
 

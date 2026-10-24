@@ -47,6 +47,7 @@ class SariSubtitleActivity : AppCompatActivity() {
     companion object {
         private const val REQ_PICK_AUDIO = 1004
         private const val REQ_PICK_VIDEO_FOR_AUTO = 1007
+        private const val REQ_SAVE_DUBBING_WAV = 1008
         private const val REQ_SAVE_WHISPER_SRT = 1005
         private const val REQ_SUBWHISPER_INTERNAL = 1006
         private const val REQ_PICK_SRT = 1001
@@ -291,6 +292,10 @@ class SariSubtitleActivity : AppCompatActivity() {
                 Toast.makeText(this@SariSubtitleActivity, if (subtitlesVisible) "تم إظهار الترجمة المكتوبة" else "تم إخفاء الترجمة المكتوبة", Toast.LENGTH_SHORT).show()
                 true
             }
+        }
+
+        findViewById<Button>(R.id.dubbingExportButton).setOnClickListener {
+            requestDubbingWavExport()
         }
 
         findViewById<Button>(R.id.testCaptureButton).setOnClickListener {
@@ -746,7 +751,7 @@ class SariSubtitleActivity : AppCompatActivity() {
         NetworkRequestRegistry.beginOperation()
         val progress = ProgressDialog(this).apply {
             setTitle("الترجمة العربية")
-            setMessage("جارٍ اكتشاف اللغة ثم الترجمة باستخدام Gemini/المزوّد المتاح…")
+            setMessage("جارٍ اكتشاف اللغة — ترتيب الترجمة: ${translationRouteLabel()}…")
             setProgressStyle(ProgressDialog.STYLE_SPINNER)
             setCancelable(false)
             setButton(ProgressDialog.BUTTON_NEGATIVE, "إلغاء") { _, _ -> cancellation.cancel() }
@@ -790,7 +795,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                         statusText.text = "عُثر على SRT لكن تعذرت ترجمته تلقائياً: ${e.message ?: "خطأ غير معروف"}"
                         androidx.appcompat.app.AlertDialog.Builder(this)
                             .setTitle("تعذرت الترجمة العربية")
-                            .setMessage("حُفظت التوقيتات الأصلية، لكن الترجمة لم تكتمل. تحقق من مفتاح Gemini والإنترنت ثم أعد المحاولة.\n\n${e.message ?: "خطأ غير معروف"}")
+                            .setMessage("تعذرت الترجمة عبر مسار المزود المحدد. حُفظت التوقيتات الأصلية؛ تحقق من المزود والاتصال ثم أعد المحاولة.\n\n${e.message ?: "خطأ غير معروف"}")
                             .setPositiveButton("حسنًا", null)
                             .show()
                     }
@@ -1749,7 +1754,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                         if (!isArabic && detectedLang.isNotBlank() && detectedLang != "au") {
                             // Gemini أولاً للترجمة النصية إذا كان مفتاحه محفوظاً، ثم DeepL/Google/MyMemory.
                             val provider = when {
-                                useTranslationRouter -> if (settings.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE) "OmniRoute/Gemini" else "Gemini/OmniRoute"
+                                useTranslationRouter -> translationRouteLabel()
                                 useDeepL -> "DeepL"
                                 else -> "Google/MyMemory"
                             }
@@ -2451,6 +2456,7 @@ private fun openAudioPicker() {
             REQ_PICK_AUDIO -> transcribeAudioFile(uri)
             REQ_PICK_VIDEO_FOR_AUTO -> transcribeDownloadedVideo(uri)
             REQ_SAVE_WHISPER_SRT -> saveWhisperSrt(uri)
+            REQ_SAVE_DUBBING_WAV -> exportDubbingWav(uri)
         }
     }
 
@@ -2641,7 +2647,8 @@ private fun openAudioPicker() {
                     lastDubbingCueStartMs = cue.startMs
                     if (ttsReady) {
                         val durationSeconds = ((cue.endMs - cue.startMs).coerceAtLeast(500L)) / 1000.0
-                        val estimatedRate = (cue.text.length / (durationSeconds * 14.0)).toFloat().coerceIn(0.75f, 1.35f)
+                        val estimatedRate = (cue.text.length / (durationSeconds * 14.0)).toFloat().coerceIn(0.75f, 1.8f)
+                        android.util.Log.i("SariDubbing", "live cue=${cue.index} startMs=${cue.startMs} endMs=${cue.endMs} slotMs=${cue.endMs - cue.startMs} speechRate=$estimatedRate provider=Android-TTS")
                         textToSpeech?.setSpeechRate(estimatedRate)
                         val params = android.os.Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f) }
                         textToSpeech?.speak(cue.text, TextToSpeech.QUEUE_FLUSH, params, "sari-dub-${cue.startMs}")
@@ -2669,6 +2676,87 @@ private fun openAudioPicker() {
         } catch (e: Exception) {
             statusText.text = "تعذر التحليل: ${e.message}"
         }
+    }
+
+    private fun translationRouteLabel(): String = when {
+        settings.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE -> "OmniRoute أولاً ثم Gemini ثم البدائل النصية"
+        settings.translationProvider == SubtitleSettings.TRANSLATION_GEMINI && settings.omniRouteEnabled -> "Gemini أولاً ثم OmniRoute ثم البدائل النصية"
+        settings.translationProvider == SubtitleSettings.TRANSLATION_GEMINI -> "Gemini ثم البدائل النصية"
+        settings.omniRouteEnabled -> "Gemini أولاً ثم OmniRoute ثم البدائل النصية"
+        else -> "Gemini ثم البدائل النصية المتاحة"
+    }
+
+    private fun requestDubbingWavExport() {
+        if (repo.isEmpty) {
+            Toast.makeText(this, "حمّل أو أنشئ SRT أولاً قبل تصدير الدبلجة", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (!ttsReady || textToSpeech == null) {
+            Toast.makeText(this, "الصوت العربي غير جاهز. نزّل صوتًا عربيًا من إعدادات تحويل النص إلى كلام في الهاتف.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val create = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "audio/wav"
+            putExtra(Intent.EXTRA_TITLE, "SariSubtitle_Arabic_Dubbing.wav")
+        }
+        startActivityForResult(create, REQ_SAVE_DUBBING_WAV)
+    }
+
+    private fun exportDubbingWav(uri: Uri) {
+        val exportCues = repo.allCues()
+        if (exportCues.isEmpty()) {
+            Toast.makeText(this, "تعذر استعادة مقاطع SRT للتصدير؛ أعد تحميل ملف الترجمة", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (dubbingEnabled) {
+            dubbingEnabled = false
+            lastDubbingCueStartMs = -1L
+            textToSpeech?.stop()
+            findViewById<Button>(R.id.dubbingButton).text = "دبلجة"
+            pollCurrentTimeOnce()
+        }
+        val dialog = ProgressDialog(this).apply {
+            setTitle("تصدير الدبلجة العربية")
+            setMessage("جارٍ توليد مقاطع WAV مع توقيتات SRT…")
+            setProgressStyle(ProgressDialog.STYLE_SPINNER)
+            setCancelable(false)
+            show()
+        }
+        Thread {
+            try {
+                val output = contentResolver.openOutputStream(uri, "wt")
+                    ?: throw IOException("تعذر فتح الملف المحدد للحفظ")
+                output.use { stream ->
+                    WavDubbingExporter.export(
+                        tts = textToSpeech ?: throw IllegalStateException("محرك TTS غير جاهز"),
+                        cues = exportCues,
+                        cacheDir = cacheDir,
+                        output = stream,
+                        onProgress = { done, total, detail -> runOnUiThread {
+                            if (!isFinishing) dialog.setMessage("توليد الدبلجة: $done / $total\n$detail")
+                        } }
+                    )
+                }
+                runOnUiThread {
+                    if (!isFinishing) {
+                        dialog.dismiss()
+                        statusText.visibility = android.view.View.VISIBLE
+                        statusText.text = "تم تصدير WAV للدبلجة العربية مع محاذاة توقيتات SRT. راجع سجل SariDubbingExport للمقاطع التي تجاوز صوتها المدة المتاحة."
+                        Toast.makeText(this, "تم حفظ ملف الدبلجة WAV", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("SariDubbingExport", "WAV export failed", e)
+                runOnUiThread {
+                    if (!isFinishing) {
+                        dialog.dismiss()
+                        Toast.makeText(this, "فشل تصدير الدبلجة: ${e.message ?: "خطأ غير معروف"}", Toast.LENGTH_LONG).show()
+                        statusText.text = "فشل تصدير الدبلجة: ${e.message ?: "راجع Logcat: SariDubbingExport"}"
+                    }
+                }
+            }
+        }.start()
     }
 
     private fun toggleArabicDubbing() {

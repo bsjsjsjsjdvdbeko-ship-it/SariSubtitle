@@ -13,6 +13,9 @@ class SubtitleRepository {
     val size: Int get() = cues.size
     val isEmpty: Boolean get() = cues.isEmpty()
 
+    /** Stable snapshot used by export operations without changing active playback cues. */
+    fun allCues(): List<SubtitleCue> = cues.toList()
+
     fun setCues(newCues: List<SubtitleCue>) {
         cues = newCues.sortedBy { it.startMs }
     }

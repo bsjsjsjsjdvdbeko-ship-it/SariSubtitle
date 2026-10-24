@@ -277,15 +277,18 @@ object SrtTranslationService {
             if (shouldCancel()) throw java.util.concurrent.CancellationException("ألغى المستخدم العملية")
             val batchTexts = batch.map { it.text }
             var batchResults: List<String>? = null
+            var batchProvider = "none"
             val omniFirst = settings?.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE
             fun tryOmniRoute(): List<String>? {
                 if (!omniRouteAvailable || settings == null) return null
                 if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
                 return try {
-                    OmniRouteTranslationClient(settings).translateBatch(batchTexts, sourceLang, targetLang)
+                    val result = OmniRouteTranslationClient(settings).translateBatch(batchTexts, sourceLang, targetLang)
+                    batchProvider = "OmniRoute"
+                    result
                 } catch (e: Exception) {
                     if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
-                    // Disable this backend for the rest of this file after a failure; avoid retry storms.
+                    Log.e(TAG, "OmniRoute batch failed; configured route will continue to next text provider. source=$sourceLang target=$targetLang batchSize=${batchTexts.size} reason=${e.message}", e)
                     omniRouteAvailable = false
                     null
                 }
@@ -294,15 +297,19 @@ object SrtTranslationService {
                 if (!geminiAvailable) return null
                 if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
                 return try {
-                    GeminiTranslationService.translateBatch(batchTexts, sourceLang, targetLang, geminiKey)
+                    val result = GeminiTranslationService.translateBatch(batchTexts, sourceLang, targetLang, geminiKey)
+                    batchProvider = "Gemini"
+                    result
                 } catch (e: Exception) {
                     if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
-                    Log.e(TAG, "Gemini translation batch failed; trying configured fallback. source=$sourceLang target=$targetLang batchSize=${batchTexts.size}", e)
-                    // Avoid repeatedly hitting an exhausted/invalid Gemini quota for every batch.
+                    Log.e(TAG, "Gemini translation batch failed; configured route will continue to next text provider. source=$sourceLang target=$targetLang batchSize=${batchTexts.size} reason=${e.message}", e)
                     geminiAvailable = false
                     null
                 }
             }
+            // One source of truth for automatic and manually selected SRT translation.
+            // Vosk is STT, not a text-translation fallback; it is never called from this route.
+            Log.i(TAG, "Translation route=${if (omniFirst) "OmniRoute->Gemini" else if (omniRouteAvailable) "Gemini->OmniRoute" else "Gemini->text-fallbacks"} source=$sourceLang target=$targetLang cues=${batch.size}")
             if (omniFirst) {
                 batchResults = tryOmniRoute() ?: tryGemini()
             } else {
@@ -311,8 +318,18 @@ object SrtTranslationService {
 
             for ((batchIndex, cue) in batch.withIndex()) {
                 if (shouldCancel()) throw java.util.concurrent.CancellationException("ألغى المستخدم العملية")
-                val translated = batchResults?.getOrNull(batchIndex)?.takeIf { it.isNotBlank() }
-                    ?: translateText(cue.text, sourceLang, targetLang, settings, shouldCancel)
+                val providerResult = batchResults?.getOrNull(batchIndex)?.takeIf { it.isNotBlank() }
+                val translated = providerResult ?: try {
+                    val fallback = translateText(cue.text, sourceLang, targetLang, settings, shouldCancel)
+                    if (batchProvider == "none" || providerResult == null) {
+                        Log.i(TAG, "cue=${cue.blockIndex + 1} provider=additional-text-fallback reason=Gemini/OmniRoute returned no cue or failed")
+                    }
+                    fallback
+                } catch (e: Exception) {
+                    Log.e(TAG, "Translation failed for cue=${cue.blockIndex + 1} source=$sourceLang target=$targetLang attempted=$batchProvider reason=${e.message}; original cue text retained", e)
+                    throw IllegalStateException("فشل ترجمة المقطع رقم ${cue.blockIndex + 1} بعد تجربة $batchProvider والبدائل النصية: ${e.message}", e)
+                }
+                Log.i(TAG, "cue=${cue.blockIndex + 1} provider=${if (providerResult != null) batchProvider else "additional-text-fallback"} source=$sourceLang target=$targetLang resultChars=${translated.length}")
                 while (cue.lines.size > cue.timeIndex + 1) cue.lines.removeAt(cue.lines.lastIndex)
                 cue.lines.add(translated)
                 output[cue.blockIndex] = cue.lines.joinToString("\n")

@@ -122,12 +122,23 @@
             android:id="@+id/dubbingButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="0.78"
+            android:layout_weight="0.72"
             android:minHeight="54dp"
-            android:layout_marginHorizontal="3dp"
-            android:textSize="11sp"
+            android:layout_marginHorizontal="2dp"
+            android:textSize="10sp"
             android:text="دبلجة"
             android:contentDescription="تشغيل أو إيقاف الدبلجة العربية؛ اضغط مطولاً لإظهار أو إخفاء الترجمة المكتوبة" />
+
+        <Button
+            android:id="@+id/dubbingExportButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.88"
+            android:minHeight="54dp"
+            android:layout_marginHorizontal="2dp"
+            android:textSize="9sp"
+            android:text="تصدير الدبلجة"
+            android:contentDescription="توليد وحفظ ملف WAV للدبلجة العربية مع الحفاظ على توقيتات SRT" />
 
         <Button
             android:id="@+id/savedItemsButton"
