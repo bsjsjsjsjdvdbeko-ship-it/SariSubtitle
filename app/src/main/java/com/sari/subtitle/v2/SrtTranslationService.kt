@@ -96,6 +96,7 @@ object SrtTranslationService {
         val settings = context?.let { SubtitleSettings(it) }
         val geminiKey = settings?.geminiApiKey.orEmpty()
         var geminiAvailable = geminiKey.isNotBlank()
+        var omniRouteAvailable = settings?.omniRouteEnabled == true || settings?.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE
 
         for ((index, block) in blocks.withIndex()) {
             if (shouldCancel()) throw java.util.concurrent.CancellationException("ألغى المستخدم العملية")
@@ -120,19 +121,38 @@ object SrtTranslationService {
         // Gemini receives up to eight subtitle texts per request to reduce API calls on long files.
         for (batch in pending.chunked(8)) {
             if (shouldCancel()) throw java.util.concurrent.CancellationException("ألغى المستخدم العملية")
-            val geminiResults = if (geminiAvailable) {
-                try {
-                    GeminiTranslationService.translateBatch(batch.map { it.text }, sourceLang, targetLang, geminiKey)
+            val batchTexts = batch.map { it.text }
+            var batchResults: List<String>? = null
+            val omniFirst = settings?.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE
+            fun tryOmniRoute(): List<String>? {
+                if (!omniRouteAvailable || settings == null) return null
+                return try {
+                    OmniRouteTranslationClient(settings).translateBatch(batchTexts, sourceLang, targetLang)
                 } catch (_: Exception) {
-                    // Avoid repeatedly hitting an exhausted/invalid Gemini quota for every cue.
+                    // Disable this backend for the rest of this file after a failure; avoid retry storms.
+                    omniRouteAvailable = false
+                    null
+                }
+            }
+            fun tryGemini(): List<String>? {
+                if (!geminiAvailable) return null
+                return try {
+                    GeminiTranslationService.translateBatch(batchTexts, sourceLang, targetLang, geminiKey)
+                } catch (_: Exception) {
+                    // Avoid repeatedly hitting an exhausted/invalid Gemini quota for every batch.
                     geminiAvailable = false
                     null
                 }
-            } else null
+            }
+            if (omniFirst) {
+                batchResults = tryOmniRoute() ?: tryGemini()
+            } else {
+                batchResults = tryGemini() ?: tryOmniRoute()
+            }
 
             for ((batchIndex, cue) in batch.withIndex()) {
                 if (shouldCancel()) throw java.util.concurrent.CancellationException("ألغى المستخدم العملية")
-                val translated = geminiResults?.getOrNull(batchIndex)?.takeIf { it.isNotBlank() }
+                val translated = batchResults?.getOrNull(batchIndex)?.takeIf { it.isNotBlank() }
                     ?: translateText(cue.text, sourceLang, targetLang, settings)
                 while (cue.lines.size > cue.timeIndex + 1) cue.lines.removeAt(cue.lines.lastIndex)
                 cue.lines.add(translated)

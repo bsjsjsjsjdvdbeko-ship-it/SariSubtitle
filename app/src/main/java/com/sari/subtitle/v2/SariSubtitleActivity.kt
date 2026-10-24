@@ -1637,12 +1637,14 @@ class SariSubtitleActivity : AppCompatActivity() {
                         val detectedLang = result.language.lowercase().take(2)
                         val isArabic = detectedLang == "ar"
                         val deepLKey = settings.deepLApiKey
-                        val useGemini = settings.geminiApiKey.isNotBlank()
-                        val useDeepL = !useGemini && deepLKey.isNotBlank()
+                        // Route through SrtTranslationService whenever Gemini or OmniRoute routing is configured.
+                        // This keeps OmniRoute selection/fallback available in the X-video translation path too.
+                        val useTranslationRouter = settings.geminiApiKey.isNotBlank() || settings.omniRouteEnabled ||
+                            settings.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE
+                        val useDeepL = !useTranslationRouter && deepLKey.isNotBlank()
                         
                         if (!isArabic && detectedLang.isNotBlank() && detectedLang != "au") {
-                            // Gemini أولاً للترجمة النصية إذا كان مفتاحه محفوظاً، ثم DeepL/Google/MyMemory.
-                            val provider = when { useGemini -> "Gemini"; useDeepL -> "DeepL"; else -> "Google/MyMemory" }
+                            val provider = when { useTranslationRouter -> if (settings.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE) "OmniRoute/Gemini" else "Gemini/OmniRoute"; useDeepL -> "DeepL"; else -> "Google/MyMemory" }
                             val progress2 = android.app.ProgressDialog(this).apply {
                                 setTitle("🌐 ترجمة → العربية ($provider)")
                                 setMessage("جارٍ الترجمة…")
@@ -1654,7 +1656,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                             
                             Thread {
                                 try {
-                                    val translatedSrt = if (useGemini) {
+                                    val translatedSrt = if (useTranslationRouter) {
                                         SrtTranslationService.translateSrt(
                                             source = result.srt,
                                             sourceLang = detectedLang,

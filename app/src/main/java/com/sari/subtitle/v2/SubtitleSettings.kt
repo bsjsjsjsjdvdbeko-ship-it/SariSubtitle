@@ -24,6 +24,9 @@ class SubtitleSettings(context: Context) {
         const val STT_DEEPGRAM = "deepgram"
         const val STT_OPENAI = "openai"
         const val STT_LOCAL = "local-vosk"
+        const val TRANSLATION_AUTO = "auto"
+        const val TRANSLATION_GEMINI = "gemini"
+        const val TRANSLATION_OMNIROUTE = "omniroute"
 
         val TEXT_SIZES = floatArrayOf(14f, 18f, 22f, 28f, 34f)
         val TEXT_SIZE_LABELS = arrayOf("صغير", "متوسط", "كبير", "كبير جداً", "ضخم")
@@ -93,6 +96,32 @@ class SubtitleSettings(context: Context) {
         set(value) { if (value.isBlank()) openAiKeyStore.clear() else openAiKeyStore.save(value) }
     fun clearOpenAiApiKey() = openAiKeyStore.clear()
     fun hasOpenAiApiKey(): Boolean = try { openAiKeyStore.read().isNotBlank() } catch (_: Exception) { false }
+
+    private val omniRouteKeyStore = OmniRouteApiKeyStore(context.applicationContext)
+    var omniRouteApiKey: String
+        get() = try { omniRouteKeyStore.read() } catch (_: Exception) { "" }
+        set(value) { if (value.isBlank()) omniRouteKeyStore.clear() else omniRouteKeyStore.save(value) }
+    fun clearOmniRouteApiKey() = omniRouteKeyStore.clear()
+    fun hasOmniRouteApiKey(): Boolean = try { omniRouteKeyStore.read().isNotBlank() } catch (_: Exception) { false }
+
+    var omniRouteBaseUrl: String
+        get() = prefs.getString("omniroute_base_url", "http://127.0.0.1:20128/v1") ?: "http://127.0.0.1:20128/v1"
+        set(value) = prefs.edit().putString("omniroute_base_url", value.trim().trimEnd('/').ifBlank { "http://127.0.0.1:20128/v1" }).apply()
+    var omniRouteTextModel: String
+        get() = prefs.getString("omniroute_text_model", "auto") ?: "auto"
+        set(value) = prefs.edit().putString("omniroute_text_model", value.trim().ifBlank { "auto" }).apply()
+
+    var omniRouteEnabled: Boolean
+        get() = prefs.getBoolean("omniroute_enabled", false)
+        set(value) = prefs.edit().putBoolean("omniroute_enabled", value).apply()
+
+    var translationProvider: String
+        get() = prefs.getString("translation_provider", TRANSLATION_AUTO) ?: TRANSLATION_AUTO
+        set(value) = prefs.edit().putString("translation_provider", when (value) {
+            TRANSLATION_GEMINI -> TRANSLATION_GEMINI
+            TRANSLATION_OMNIROUTE -> TRANSLATION_OMNIROUTE
+            else -> TRANSLATION_AUTO
+        }).apply()
 
     private val geminiKeyStore = GeminiApiKeyStore(context.applicationContext)
     var geminiApiKey: String
