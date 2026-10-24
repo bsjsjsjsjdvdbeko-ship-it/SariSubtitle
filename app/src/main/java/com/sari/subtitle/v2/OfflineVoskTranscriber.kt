@@ -77,6 +77,7 @@ class OfflineVoskTranscriber(private val context: Context) {
                         var offset = 0
                         val chunkSize = 8192
                         while (usable - offset >= 2) {
+                            if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء التفريغ المحلي")
                             val count = minOf(chunkSize, usable - offset) and -2
                             val chunk = bytes.copyOfRange(offset, offset + count)
                             if (recognizer!!.acceptWaveForm(chunk, chunk.size)) {
@@ -96,6 +97,7 @@ class OfflineVoskTranscriber(private val context: Context) {
                     }
 
                     while (!outputDone) {
+                        if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء التفريغ المحلي")
                         if (!inputDone) {
                             val inputIndex = codec.dequeueInputBuffer(10000)
                             if (inputIndex >= 0) {

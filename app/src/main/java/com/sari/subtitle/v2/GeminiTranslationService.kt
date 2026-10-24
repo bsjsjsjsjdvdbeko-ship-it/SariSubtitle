@@ -36,7 +36,7 @@ object GeminiTranslationService {
                 .put("responseMimeType", "application/json")
                 .put("maxOutputTokens", (texts.sumOf { it.length } * 3 + 256).coerceIn(512, 8192)))
 
-        val connection = (URL("https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent")
+        val connection = NetworkRequestRegistry.register(URL("https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent")
             .openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15000
@@ -72,6 +72,7 @@ object GeminiTranslationService {
             return result
         } finally {
             connection.disconnect()
+            NetworkRequestRegistry.unregister(connection)
         }
     }
 }

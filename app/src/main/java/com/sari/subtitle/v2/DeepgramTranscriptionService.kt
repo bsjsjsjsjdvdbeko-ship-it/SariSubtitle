@@ -28,7 +28,7 @@ class DeepgramTranscriptionService(private val context: Context, private val api
             require(temp.length() in 1L..(24L * 1024L * 1024L)) { "يجب أن يكون حجم الملف بين 1 بايت و24 MB." }
             val params = mutableListOf("model=nova-3", "smart_format=true", "utterances=true", "punctuate=true")
             if (language == "auto") params += "detect_language=true" else params += "language=${URLEncoder.encode(language, "UTF-8")}"
-            val conn = (URL("https://api.deepgram.com/v1/listen?${params.joinToString("&")}").openConnection() as HttpURLConnection)
+            val conn = NetworkRequestRegistry.register(URL("https://api.deepgram.com/v1/listen?${params.joinToString("&")}").openConnection() as HttpURLConnection)
             try {
                 conn.requestMethod = "POST"; conn.connectTimeout = 30000; conn.readTimeout = 180000
                 conn.doOutput = true; conn.setRequestProperty("Authorization", "Token $key"); conn.setRequestProperty("Content-Type", mime)
@@ -41,7 +41,7 @@ class DeepgramTranscriptionService(private val context: Context, private val api
                     throw IOException("فشل Deepgram (HTTP $status): ${message.ifBlank { body.take(400) }}")
                 }
                 return parse(body, language)
-            } finally { conn.disconnect() }
+            } finally { conn.disconnect(); NetworkRequestRegistry.unregister(conn) }
         } finally { temp.delete() }
     }
     private fun parse(body: String, requested: String): Result {

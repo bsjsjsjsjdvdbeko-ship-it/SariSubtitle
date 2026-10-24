@@ -125,7 +125,7 @@ object DeepLTranslationService {
     private fun tryDeepL(text: String, sourceLang: String, targetLang: String, apiKey: String): String {
         return try {
             val url = URL("https://api-free.deepl.com/v2/translate")
-            val connection = url.openConnection() as HttpURLConnection
+            val connection = NetworkRequestRegistry.register(url.openConnection() as HttpURLConnection)
             connection.requestMethod = "POST"
             connection.doOutput = true
             connection.connectTimeout = 15000
@@ -161,7 +161,7 @@ object DeepLTranslationService {
         return try {
             val encoded = URLEncoder.encode(text, "UTF-8")
             val url = URL("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=$targetLang&dt=t&q=$encoded")
-            val connection = url.openConnection() as HttpURLConnection
+            val connection = NetworkRequestRegistry.register(url.openConnection() as HttpURLConnection)
             connection.requestMethod = "GET"
             connection.connectTimeout = 10000
             connection.readTimeout = 10000
@@ -197,7 +197,7 @@ object DeepLTranslationService {
             val q = URLEncoder.encode(text, "UTF-8")
             val pair = URLEncoder.encode("$sourceLang|$targetLang", "UTF-8")
             val url = URL("https://api.mymemory.translated.net/get?q=$q&langpair=$pair")
-            val connection = url.openConnection() as HttpURLConnection
+            val connection = NetworkRequestRegistry.register(url.openConnection() as HttpURLConnection)
             connection.requestMethod = "GET"
             connection.connectTimeout = 10000
             connection.readTimeout = 15000

@@ -99,7 +99,7 @@ object TranslationProvidersDialog {
             val enteredKey = omniKey.text.toString().trim()
             val enteredModel = omniTextModel.text.toString().trim().ifBlank { "auto" }
             testButton.isEnabled = false
-            testButton.text = "جارٍ اختبار الاتصال…"
+            testButton.text = "جاري الاتصال، قد يستغرق 30 ثانية..."
             Thread {
                 val result = try {
                     settings.omniRouteBaseUrl = enteredBase

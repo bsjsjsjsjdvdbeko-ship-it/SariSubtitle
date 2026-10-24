@@ -27,6 +27,9 @@ import android.widget.Spinner
 import android.widget.TextView
 import android.widget.EditText
 import android.widget.Toast
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import java.util.Locale
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import androidx.webkit.WebViewFeature
@@ -66,6 +69,12 @@ class SariSubtitleActivity : AppCompatActivity() {
     private val repo = SubtitleRepository()
     private var polling = false
     private var overlayOn = false
+    private var subtitlesVisible = true
+    private var dubbingEnabled = false
+    private var ttsReady = false
+    private var lastDubbingCueStartMs = -1L
+    private var textToSpeech: TextToSpeech? = null
+    private var activeOperationCancellation: OperationCancellation? = null
 
     /** آخر SRT نصي محمّل (للحفظ عند الحاجة) */
     private var lastSrtText: String? = null
@@ -86,6 +95,21 @@ class SariSubtitleActivity : AppCompatActivity() {
         settings = SubtitleSettings(this)
         storage = SrtStorage(this)
         repo.offsetMs = settings.offsetMs
+        textToSpeech = TextToSpeech(this) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val engine = textToSpeech
+                val languageResult = engine?.setLanguage(Locale("ar")) ?: TextToSpeech.LANG_NOT_SUPPORTED
+                val offlineArabicVoice = engine?.voices?.firstOrNull {
+                    it.locale.language.equals("ar", ignoreCase = true) && !it.isNetworkConnectionRequired
+                }
+                if (offlineArabicVoice != null) engine?.voice = offlineArabicVoice
+                ttsReady = languageResult != TextToSpeech.LANG_MISSING_DATA &&
+                    languageResult != TextToSpeech.LANG_NOT_SUPPORTED && offlineArabicVoice != null
+                if (!ttsReady) runOnUiThread {
+                    Toast.makeText(this, "لا يوجد صوت عربي محلي جاهز. نزّل بيانات صوت عربي غير متصل من إعدادات تحويل النص إلى كلام في الهاتف.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
 
         urlInput = findViewById(R.id.urlInput)
         statusText = findViewById(R.id.statusText)
@@ -256,6 +280,17 @@ class SariSubtitleActivity : AppCompatActivity() {
         // واجهة المستخدم الرئيسية تعرض الوظائف الأساسية فقط؛ المحفوظات لا تحتاج إعادة تفريغ.
         findViewById<Button>(R.id.savedItemsButton).setOnClickListener {
             showSavedSubtitles()
+        }
+
+        findViewById<Button>(R.id.dubbingButton).apply {
+            setOnClickListener { toggleArabicDubbing() }
+            setOnLongClickListener {
+                subtitlesVisible = !subtitlesVisible
+                if (!subtitlesVisible) subtitleOverlay.hide()
+                else pollCurrentTimeOnce()
+                Toast.makeText(this@SariSubtitleActivity, if (subtitlesVisible) "تم إظهار الترجمة المكتوبة" else "تم إخفاء الترجمة المكتوبة", Toast.LENGTH_SHORT).show()
+                true
+            }
         }
 
         findViewById<Button>(R.id.testCaptureButton).setOnClickListener {
@@ -454,19 +489,25 @@ class SariSubtitleActivity : AppCompatActivity() {
     }
 
     private fun downloadAndTranscribeDirectMedia(link: String, language: String) {
+        val cancellation = OperationCancellation()
+        activeOperationCancellation = cancellation
+        NetworkRequestRegistry.beginOperation()
         val progress = ProgressDialog(this).apply {
             setTitle("إنشاء ملف SRT")
             setMessage("جارٍ تنزيل ملف الوسائط…")
             setProgressStyle(ProgressDialog.STYLE_SPINNER)
             setCancelable(false)
+            setButton(ProgressDialog.BUTTON_NEGATIVE, "إلغاء") { _, _ -> cancellation.cancel() }
             show()
+            getButton(ProgressDialog.BUTTON_NEGATIVE)?.setOnClickListener { cancellation.cancel(); setMessage("جارٍ إيقاف التنزيل والتفريغ…") }
         }
         statusText.text = "جارٍ تنزيل ملف الوسائط من الرابط المباشر…"
-        Thread {
+        val worker = Thread {
             var temp: java.io.File? = null
             var connection: java.net.HttpURLConnection? = null
             try {
-                connection = (java.net.URL(link).openConnection() as java.net.HttpURLConnection).apply {
+                cancellation.check()
+                connection = NetworkRequestRegistry.register(java.net.URL(link).openConnection() as java.net.HttpURLConnection).apply {
                     requestMethod = "GET"
                     connectTimeout = 20_000
                     readTimeout = 60_000
@@ -488,6 +529,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                 connection.inputStream.use { inputStream -> temp!!.outputStream().buffered().use { output ->
                     val buffer = ByteArray(8192)
                     while (true) {
+                        cancellation.check()
                         val count = inputStream.read(buffer)
                         if (count < 0) break
                         total += count
@@ -497,9 +539,11 @@ class SariSubtitleActivity : AppCompatActivity() {
                 } }
                 if (total == 0L) throw IOException("الملف الذي تم تنزيله فارغ.")
                 runOnUiThread { progress.setMessage("تم تنزيل ${(total / 1024)} KB — جارٍ التفريغ عبر ${settings.sttProviderLabel}…") }
+                cancellation.check()
                 val result = transcribeWithSelectedProvider(Uri.fromFile(temp!!), language)
+                cancellation.check()
                 runOnUiThread {
-                    if (isFinishing) return@runOnUiThread
+                    if (isFinishing || cancellation.isCancelled()) { progress.dismiss(); Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
                     progress.dismiss()
                     pendingWhisperSrt = result.srt
                     statusText.text = "اكتمل التفريغ: ${result.segmentCount} مقطع"
@@ -521,6 +565,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (!isFinishing) {
                         progress.dismiss()
+                        if (cancellation.isCancelled() || e is java.util.concurrent.CancellationException) { pendingWhisperSrt = null; statusText.text = "تم إلغاء العملية"; Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
                         statusText.text = "تعذر إنشاء SRT من الرابط المباشر"
                         androidx.appcompat.app.AlertDialog.Builder(this)
                             .setTitle("تعذر إنشاء SRT")
@@ -531,9 +576,10 @@ class SariSubtitleActivity : AppCompatActivity() {
                 }
             } finally {
                 connection?.disconnect()
+                connection?.let { NetworkRequestRegistry.unregister(it) }
                 temp?.delete()
             }
-        }.start()
+        }.also { cancellation.worker = it; it.start() }
     }
 
     /** يتيح جلب ملف ترجمة SRT منشور برابط مباشر؛ لا يستخرج الصوت من رابط الفيديو. */
@@ -695,26 +741,34 @@ class SariSubtitleActivity : AppCompatActivity() {
 
     /** Translate a fetched/generated SRT to Arabic, preserve cue timestamps, show it, and cache it. */
     private fun translateAndShowSrtAutomatically(videoUrl: String, sourceSrt: String, fileName: String) {
+        val cancellation = OperationCancellation()
+        activeOperationCancellation = cancellation
+        NetworkRequestRegistry.beginOperation()
         val progress = ProgressDialog(this).apply {
             setTitle("الترجمة العربية")
             setMessage("جارٍ اكتشاف اللغة ثم الترجمة باستخدام Gemini/المزوّد المتاح…")
             setProgressStyle(ProgressDialog.STYLE_SPINNER)
             setCancelable(false)
+            setButton(ProgressDialog.BUTTON_NEGATIVE, "إلغاء") { _, _ -> cancellation.cancel() }
             show()
+            getButton(ProgressDialog.BUTTON_NEGATIVE)?.setOnClickListener { cancellation.cancel(); setMessage("جارٍ إلغاء العملية…") }
         }
-        Thread {
+        val worker = Thread {
             try {
+                cancellation.check()
                 val translated = SrtTranslationService.translateAuto(
                     source = sourceSrt,
                     targetLang = "ar",
                     context = applicationContext,
+                    shouldCancel = { cancellation.isCancelled() },
                     onDetected = { lang -> runOnUiThread { if (!isFinishing) progress.setMessage("لغة المصدر: $lang — جارٍ الترجمة إلى العربية…") } },
                     onProgress = { done, total -> runOnUiThread { if (!isFinishing) progress.setMessage("جارٍ ترجمة المقاطع: $done / $total") } }
                 )
+                cancellation.check()
                 val cues = SrtParser.parse(translated.byteInputStream(Charsets.UTF_8))
                 if (cues.isEmpty()) throw IllegalStateException("لم ينتج ملف SRT صالح")
                 runOnUiThread {
-                    if (isFinishing) return@runOnUiThread
+                    if (isFinishing || cancellation.isCancelled()) { progress.dismiss(); pendingWhisperSrt = null; Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
                     progress.dismiss()
                     repo.setCues(cues)
                     lastSrtText = translated
@@ -732,6 +786,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (!isFinishing) {
                         progress.dismiss()
+                        if (cancellation.isCancelled() || e is java.util.concurrent.CancellationException) { statusText.text = "تم إلغاء العملية"; Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
                         statusText.text = "عُثر على SRT لكن تعذرت ترجمته تلقائياً: ${e.message ?: "خطأ غير معروف"}"
                         androidx.appcompat.app.AlertDialog.Builder(this)
                             .setTitle("تعذرت الترجمة العربية")
@@ -741,7 +796,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                     }
                 }
             }
-        }.start()
+        }.also { cancellation.worker = it; it.start() }
     }
 
     /** Extracts an existing public YouTube caption track without downloading the video. */
@@ -925,21 +980,30 @@ class SariSubtitleActivity : AppCompatActivity() {
             Toast.makeText(this, "تعذّر قراءة ملف SRT", Toast.LENGTH_LONG).show()
             return
         }
+        val cancellation = OperationCancellation()
+        activeOperationCancellation = cancellation
+        NetworkRequestRegistry.beginOperation()
         val progress = ProgressDialog(this).apply {
             setTitle("ترجمة ملف SRT")
             setMessage("جارٍ بدء الترجمة…")
             setProgressStyle(ProgressDialog.STYLE_SPINNER)
             setCancelable(false)
+            setButton(ProgressDialog.BUTTON_NEGATIVE, "إلغاء") { _, _ -> cancellation.cancel() }
             show()
+            getButton(ProgressDialog.BUTTON_NEGATIVE)?.setOnClickListener { cancellation.cancel(); setMessage("جارٍ إلغاء الترجمة…") }
         }
-        Thread {
+        val worker = Thread {
             try {
-                val translated = SrtTranslationService.translateSrt(raw, pendingSourceLang, pendingTargetLang, applicationContext) { done, total ->
-                    runOnUiThread { progress.setMessage("جارٍ ترجمة المقاطع: $done / $total") }
-                }
+                cancellation.check()
+                val translated = SrtTranslationService.translateSrt(raw, pendingSourceLang, pendingTargetLang, applicationContext,
+                    shouldCancel = { cancellation.isCancelled() }, onProgress = { done, total ->
+                    runOnUiThread { if (!cancellation.isCancelled()) progress.setMessage("جارٍ ترجمة المقاطع: $done / $total") }
+                })
+                cancellation.check()
                 pendingTranslatedSrt = translated
                 runOnUiThread {
                     progress.dismiss()
+                    if (cancellation.isCancelled()) { pendingTranslatedSrt = null; Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
                     val create = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                         addCategory(Intent.CATEGORY_OPENABLE)
                         setType("application/x-subrip")
@@ -950,6 +1014,8 @@ class SariSubtitleActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 runOnUiThread {
                     progress.dismiss()
+                    pendingTranslatedSrt = null
+                    if (cancellation.isCancelled() || e is java.util.concurrent.CancellationException) { Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
                     androidx.appcompat.app.AlertDialog.Builder(this)
                         .setTitle("تعذرت الترجمة")
                         .setMessage("${e.message ?: "خطأ غير معروف"}\n\nتحقق من الإنترنت ورمز اللغة وحدود الخدمة المجانية، ثم حاول مرة أخرى.")
@@ -957,7 +1023,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                         .show()
                 }
             }
-        }.start()
+        }.also { cancellation.worker = it; it.start() }
     }
 
     private fun saveTranslatedSrt(uri: Uri) {
@@ -1078,6 +1144,9 @@ class SariSubtitleActivity : AppCompatActivity() {
             return
         }
 
+        val cancellation = OperationCancellation()
+        activeOperationCancellation = cancellation
+        NetworkRequestRegistry.beginOperation()
         val cancelRequested = java.util.concurrent.atomic.AtomicBoolean(false)
         val progress = ProgressDialog(this).apply {
             setTitle("ترجمة ملف الترجمة")
@@ -1091,12 +1160,14 @@ class SariSubtitleActivity : AppCompatActivity() {
         // network request may need to finish before cancellation takes effect.
         progress.getButton(ProgressDialog.BUTTON_NEGATIVE)?.setOnClickListener {
             cancelRequested.set(true)
+            cancellation.cancel()
             progress.getButton(ProgressDialog.BUTTON_NEGATIVE)?.isEnabled = false
             progress.setMessage("جارٍ الإيقاف بعد انتهاء طلب الترجمة الجاري…")
         }
 
-        Thread {
+        val worker = Thread {
             try {
+                cancellation.check()
                 val translated = SrtTranslationService.translateAuto(
                     source = raw,
                     targetLang = "ar",
@@ -1107,8 +1178,9 @@ class SariSubtitleActivity : AppCompatActivity() {
                     onProgress = { done, total ->
                         runOnUiThread { if (!cancelRequested.get()) progress.setMessage("جارٍ ترجمة المقاطع: $done / $total") }
                     },
-                    shouldCancel = { cancelRequested.get() }
+                    shouldCancel = { cancelRequested.get() || cancellation.isCancelled() }
                 )
+                cancellation.check()
                 if (cancelRequested.get()) throw java.util.concurrent.CancellationException("ألغى المستخدم العملية")
 
                 pendingTranslatedSrt = translated
@@ -1118,6 +1190,7 @@ class SariSubtitleActivity : AppCompatActivity() {
 
                 runOnUiThread {
                     progress.dismiss()
+                    if (cancelRequested.get() || cancellation.isCancelled()) { pendingTranslatedSrt = null; statusText.text = "تم إلغاء العملية"; Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
                     repo.setCues(translatedCues)
                     lastSrtText = translated
                     overlayOn = true
@@ -1172,7 +1245,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                     }
                 }
             }
-        }.start()
+        }.also { cancellation.worker = it; it.start() }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1491,18 +1564,24 @@ class SariSubtitleActivity : AppCompatActivity() {
             Toast.makeText(this, "أضف مفتاح Groq أو ثبّت نموذج Vosk المحلي من الإعدادات أولاً", Toast.LENGTH_LONG).show()
             return
         }
+        val cancellation = OperationCancellation()
+        activeOperationCancellation = cancellation
+        NetworkRequestRegistry.beginOperation()
         val progress = ProgressDialog(this).apply {
             setTitle("إنشاء الترجمة العربية")
             setMessage("جارٍ تجهيز الملف الصوتي…")
             setProgressStyle(ProgressDialog.STYLE_SPINNER)
             setCancelable(false)
+            setButton(ProgressDialog.BUTTON_NEGATIVE, "إلغاء") { _, _ -> cancellation.cancel() }
             show()
+            getButton(ProgressDialog.BUTTON_NEGATIVE)?.setOnClickListener { cancellation.cancel(); setMessage("جارٍ إيقاف استخراج الصوت والتفريغ…") }
         }
         statusText.visibility = android.view.View.VISIBLE
         statusText.text = "جارٍ تفريغ الملف الصوتي أو الفيديو ثم ترجمته إلى العربية…"
-        Thread {
+        val worker = Thread {
             var extractedAudio: java.io.File? = null
             try {
+                cancellation.check()
                 val mimeType = contentResolver.getType(uri).orEmpty().lowercase(java.util.Locale.ROOT)
                 val displayName = queryDisplayName(uri).orEmpty().lowercase(java.util.Locale.ROOT)
                 val isAudioFile = mimeType.startsWith("audio/") ||
@@ -1518,6 +1597,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                         extractedAudio = extractAudioTrackForCloud(uri)
                         transcribeWithSelectedProvider(Uri.fromFile(extractedAudio!!), "auto")
                     } catch (cloudPrepError: Exception) {
+                        cancellation.check()
                         val hasLocalModel = VoskModelManager.isInstalled(applicationContext, VoskModelManager.ARABIC) ||
                             VoskModelManager.isInstalled(applicationContext, VoskModelManager.ENGLISH)
                         if (!hasLocalModel) throw cloudPrepError
@@ -1528,12 +1608,13 @@ class SariSubtitleActivity : AppCompatActivity() {
                         SelectedTranscriptionResult(local.language, local.text, local.srt, local.segmentCount)
                     }
                 }
+                cancellation.check()
                 val rawSrt = result.srt
                 if (SrtParser.parse(rawSrt.byteInputStream(Charsets.UTF_8)).isEmpty()) {
                     throw IllegalStateException("لم ينتج التفريغ ملف SRT صالحاً")
                 }
                 runOnUiThread {
-                    if (isFinishing) return@runOnUiThread
+                    if (isFinishing || cancellation.isCancelled()) { progress.dismiss(); Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
                     progress.setMessage("اكتمل التفريغ — جارٍ ترجمة SRT إلى العربية…")
                     translateAndShowSrtAutomatically("local-media://${uri.lastPathSegment ?: System.currentTimeMillis()}", rawSrt, "downloaded-media-${System.currentTimeMillis()}.srt")
                     progress.dismiss()
@@ -1542,6 +1623,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (!isFinishing) {
                         progress.dismiss()
+                        if (cancellation.isCancelled() || e is java.util.concurrent.CancellationException) { statusText.text = "تم إلغاء العملية"; Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
                         androidx.appcompat.app.AlertDialog.Builder(this)
                             .setTitle("تعذّر إنشاء الترجمة")
                             .setMessage("${e.message ?: "حدث خطأ أثناء تفريغ الفيديو"}\n\nتأكد من أن الفيديو يحتوي على صوت، وأن مفتاح Groq صالح أو نموذج Vosk المناسب مثبت.")
@@ -1553,7 +1635,7 @@ class SariSubtitleActivity : AppCompatActivity() {
             } finally {
                 extractedAudio?.delete()
             }
-        }.start()
+        }.also { cancellation.worker = it; it.start() }
     }
 
     /** Remux the compressed audio track from a local video into an M4A container for cloud STT. */
@@ -1577,6 +1659,7 @@ class SariSubtitleActivity : AppCompatActivity() {
             val buffer = java.nio.ByteBuffer.allocate(1024 * 1024)
             val info = android.media.MediaCodec.BufferInfo()
             while (true) {
+                if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
                 buffer.clear()
                 val size = extractor.readSampleData(buffer, 0)
                 if (size < 0) break
@@ -1605,18 +1688,24 @@ class SariSubtitleActivity : AppCompatActivity() {
             return
         }
 
+        val cancellation = OperationCancellation()
+        activeOperationCancellation = cancellation
+        NetworkRequestRegistry.beginOperation()
         val progress = android.app.ProgressDialog(this).apply {
             setTitle("🌐 ${settings.sttProviderLabel}")
             setMessage("جارٍ التفريغ…")
             setProgressStyle(android.app.ProgressDialog.STYLE_SPINNER)
             setCancelable(false)
+            setButton(android.content.DialogInterface.BUTTON_NEGATIVE, "إلغاء") { _, _ -> cancellation.cancel() }
             show()
+            getButton(android.content.DialogInterface.BUTTON_NEGATIVE)?.setOnClickListener { cancellation.cancel(); setMessage("جارٍ إلغاء التفريغ…") }
         }
 
         val startTime = System.currentTimeMillis()
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         val timer = object : Runnable {
             override fun run() {
+                if (cancellation.isCancelled()) return
                 val elapsed = (System.currentTimeMillis() - startTime) / 1000
                 progress.setMessage("🌐 جارٍ التفريغ…\nمضى: ${elapsed}s")
                 handler.postDelayed(this, 1000)
@@ -1624,8 +1713,9 @@ class SariSubtitleActivity : AppCompatActivity() {
         }
         handler.post(timer)
 
-        Thread {
+        val worker = Thread {
             try {
+                cancellation.check()
                 val tempFile = java.io.File(cacheDir, "x_audio_${System.currentTimeMillis()}.webm")
                 tempFile.writeBytes(audioBytes)
 
@@ -1635,9 +1725,11 @@ class SariSubtitleActivity : AppCompatActivity() {
                     tempFile.delete()
                 }
 
+                cancellation.check()
                 handler.removeCallbacks(timer)
                 runOnUiThread {
                     progress.dismiss()
+                    if (cancellation.isCancelled()) { Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); statusText.text = "تم إلغاء العملية"; return@runOnUiThread }
                     try {
                         val cues = SrtParser.parse(result.srt.byteInputStream())
                         if (cues.isEmpty()) {
@@ -1661,23 +1753,29 @@ class SariSubtitleActivity : AppCompatActivity() {
                                 useDeepL -> "DeepL"
                                 else -> "Google/MyMemory"
                             }
+                            val translationCancellation = OperationCancellation()
+                            activeOperationCancellation = translationCancellation
                             val progress2 = android.app.ProgressDialog(this).apply {
                                 setTitle("🌐 ترجمة → العربية ($provider)")
                                 setMessage("جارٍ الترجمة…")
                                 setProgressStyle(android.app.ProgressDialog.STYLE_HORIZONTAL)
                                 setCancelable(false)
                                 max = 100
+                                setButton(android.content.DialogInterface.BUTTON_NEGATIVE, "إلغاء") { _, _ -> translationCancellation.cancel() }
                                 show()
+                                getButton(android.content.DialogInterface.BUTTON_NEGATIVE)?.setOnClickListener { translationCancellation.cancel(); setMessage("جارٍ إلغاء الترجمة…") }
                             }
                             
-                            Thread {
+                            val translationWorker = Thread {
                                 try {
+                                    translationCancellation.check()
                                     val translatedSrt = if (useTranslationRouter) {
                                         SrtTranslationService.translateSrt(
                                             source = result.srt,
                                             sourceLang = detectedLang,
                                             targetLang = "ar",
-                                            context = applicationContext
+                                            context = applicationContext,
+                                            shouldCancel = { translationCancellation.isCancelled() }
                                         ) { done, total ->
                                             runOnUiThread {
                                                 progress2.progress = if (total > 0) (done * 100 / total) else 100
@@ -1701,7 +1799,8 @@ class SariSubtitleActivity : AppCompatActivity() {
                                             source = result.srt,
                                             sourceLang = detectedLang,
                                             targetLang = "ar",
-                                            context = applicationContext
+                                            context = applicationContext,
+                                            shouldCancel = { translationCancellation.isCancelled() }
                                         ) { done, total ->
                                             runOnUiThread {
                                                 progress2.progress = (done * 100 / total)
@@ -1710,9 +1809,11 @@ class SariSubtitleActivity : AppCompatActivity() {
                                         }
                                     }
                                     
+                                    translationCancellation.check()
                                     val translatedCues = SrtParser.parse(translatedSrt.byteInputStream())
                                     runOnUiThread {
                                         progress2.dismiss()
+                                        if (translationCancellation.isCancelled()) { Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); statusText.text = "تم إلغاء العملية"; return@runOnUiThread }
                                         repo.setCues(translatedCues)
                                         lastSrtText = translatedSrt
                                         val videoUrlForCache = urlInput.text.toString().trim().ifBlank { webView.url.orEmpty() }
@@ -1745,6 +1846,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                                 } catch (e: Exception) {
                                     runOnUiThread {
                                         progress2.dismiss()
+                                        if (translationCancellation.isCancelled() || e is java.util.concurrent.CancellationException) { Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); statusText.text = "تم إلغاء العملية"; return@runOnUiThread }
                                         // فشل الترجمة — استخدم SRT الأصلي
                                         repo.setCues(cues)
                                         overlayOn = true
@@ -1760,7 +1862,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                                         }
                                     }
                                 }
-                            }.start()
+                            }.also { translationCancellation.worker = it; it.start() }
                         } else {
                             // SRT عربي بالفعل
                             repo.setCues(cues)
@@ -1795,7 +1897,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                     Toast.makeText(this, "❌ فشل التفريغ: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
-        }.start()
+        }.also { cancellation.worker = it; it.start() }
     }
 
 private data class SelectedTranscriptionResult(val language: String, val text: String, val srt: String, val segmentCount: Int)
@@ -2190,17 +2292,20 @@ private fun openAudioPicker() {
             return
         }
 
+        val cancellation = OperationCancellation()
+        activeOperationCancellation = cancellation
+        NetworkRequestRegistry.beginOperation()
         // إنشاء ProgressDialog مع مؤقت
         val progress = android.app.ProgressDialog(this).apply {
             setTitle("تفريغ الصوت (${settings.sttProviderLabel})")
             setMessage("جارٍ بدء الطلب…")
             setProgressStyle(android.app.ProgressDialog.STYLE_SPINNER)
             setCancelable(false)
-            setButton(
-                android.content.DialogInterface.BUTTON_NEGATIVE,
-                "إلغاء"
-            ) { _, _ -> /* يمكن إلغاؤه لاحقاً */ }
+            setButton(android.content.DialogInterface.BUTTON_NEGATIVE, "إلغاء") { _, _ -> cancellation.cancel() }
             show()
+            getButton(android.content.DialogInterface.BUTTON_NEGATIVE)?.setOnClickListener {
+                cancellation.cancel(); setMessage("جارٍ إلغاء التفريغ…")
+            }
         }
 
         val startTime = System.currentTimeMillis()
@@ -2222,14 +2327,17 @@ private fun openAudioPicker() {
 
         statusText.text = "⏳ جارٍ التفريغ… (${language})"
 
-        Thread {
+        val worker = Thread {
             try {
+                cancellation.check()
                 val result = transcribeWithSelectedProvider(uri, language)
+                cancellation.check()
                 val totalTime = ((System.currentTimeMillis() - startTime) / 1000).toInt()
                 cancelled = true
                 runOnUiThread {
                     handler.removeCallbacks(timer)
                     progress.dismiss()
+                    if (cancellation.isCancelled()) { Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); statusText.text = "تم إلغاء العملية"; return@runOnUiThread }
                     pendingWhisperSrt = result.srt
 
                     // حمّل نتيجة التفريغ مباشرة إلى عارض الترجمة؛ لا تجعلها ملفاً للحفظ فقط.
@@ -2266,6 +2374,7 @@ private fun openAudioPicker() {
                 runOnUiThread {
                     handler.removeCallbacks(timer)
                     progress.dismiss()
+                    if (cancellation.isCancelled() || e is java.util.concurrent.CancellationException) { statusText.text = "تم إلغاء العملية"; Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
                     val msg = e.message ?: "خطأ غير معروف"
                     statusText.text = "❌ فشل التفريغ بعد ${totalTime}s: $msg"
                     android.app.AlertDialog.Builder(this)
@@ -2275,7 +2384,7 @@ private fun openAudioPicker() {
                         .show()
                 }
             }
-        }.start()
+        }.also { cancellation.worker = it; it.start() }
     }
 
     private fun saveWhisperSrt(uri: Uri) {
@@ -2438,6 +2547,7 @@ private fun openAudioPicker() {
         val js = """
             (function() {
               try {
+                window.__sariDubEnabled = ${if (dubbingEnabled) "true" else "false"};
                 function collect(root, acc) {
                   try {
                     var v = root.querySelectorAll('video');
@@ -2466,6 +2576,18 @@ private fun openAudioPicker() {
                   } catch(e){}
                 }
                 if (!best) best = vids[0];
+                if (window.__sariDubEnabled) {
+                  if (!best.hasAttribute('data-sari-dub-original')) {
+                    best.setAttribute('data-sari-dub-original', '1');
+                    best.dataset.sariDubMuted = best.muted ? '1' : '0';
+                    best.dataset.sariDubVolume = String(best.volume);
+                  }
+                  best.muted = true; best.volume = 0;
+                } else if (best.hasAttribute('data-sari-dub-original')) {
+                  best.muted = best.dataset.sariDubMuted === '1';
+                  best.volume = Number(best.dataset.sariDubVolume || '1');
+                  best.removeAttribute('data-sari-dub-original');
+                }
                 var t = Number(best.currentTime);
                 var d = Number(best.duration);
                 return JSON.stringify({
@@ -2506,11 +2628,28 @@ private fun openAudioPicker() {
 
             val cue = repo.findCueAt((t * 1000).toLong())
 
-            if (overlayOn && !repo.isEmpty) {
-                if (cue != null) subtitleOverlay.show(cue.text)
-                else subtitleOverlay.hide()
-            } else if (!overlayOn) {
+            if (subtitlesVisible && overlayOn && !repo.isEmpty) {
+                if (cue != null) subtitleOverlay.show(cue.text) else subtitleOverlay.hide()
+            } else {
                 subtitleOverlay.hide()
+            }
+            if (dubbingEnabled) {
+                if (p) {
+                    textToSpeech?.stop()
+                    lastDubbingCueStartMs = -1L
+                } else if (cue != null && cue.startMs != lastDubbingCueStartMs) {
+                    lastDubbingCueStartMs = cue.startMs
+                    if (ttsReady) {
+                        val durationSeconds = ((cue.endMs - cue.startMs).coerceAtLeast(500L)) / 1000.0
+                        val estimatedRate = (cue.text.length / (durationSeconds * 14.0)).toFloat().coerceIn(0.75f, 1.35f)
+                        textToSpeech?.setSpeechRate(estimatedRate)
+                        val params = android.os.Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f) }
+                        textToSpeech?.speak(cue.text, TextToSpeech.QUEUE_FLUSH, params, "sari-dub-${cue.startMs}")
+                    }
+                } else if (cue == null && lastDubbingCueStartMs != -1L) {
+                    textToSpeech?.stop()
+                    lastDubbingCueStartMs = -1L
+                }
             }
 
             val pos = formatSec(t)
@@ -2530,6 +2669,24 @@ private fun openAudioPicker() {
         } catch (e: Exception) {
             statusText.text = "تعذر التحليل: ${e.message}"
         }
+    }
+
+    private fun toggleArabicDubbing() {
+        if (repo.isEmpty) {
+            Toast.makeText(this, "حمّل أو أنشئ ترجمة SRT أولاً، ثم شغّل الدبلجة", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (!ttsReady) {
+            Toast.makeText(this, "الصوت العربي غير جاهز. نزّل بيانات صوت عربية من إعدادات تحويل النص إلى كلام في الهاتف ثم أعد المحاولة.", Toast.LENGTH_LONG).show()
+            return
+        }
+        dubbingEnabled = !dubbingEnabled
+        lastDubbingCueStartMs = -1L
+        if (!dubbingEnabled) { textToSpeech?.stop(); textToSpeech?.setSpeechRate(1.0f) }
+        findViewById<Button>(R.id.dubbingButton).text = if (dubbingEnabled) "إيقاف الدبلجة" else "دبلجة"
+        statusText.visibility = android.view.View.VISIBLE
+        statusText.text = if (dubbingEnabled) "الدبلجة العربية تعمل. تم كتم صوت الفيديو الأصلي. اضغط مطولاً على زر الدبلجة لإظهار/إخفاء النص." else "تم إيقاف الدبلجة وإعادة صوت الفيديو إلى حالته السابقة."
+        pollCurrentTimeOnce()
     }
 
     private fun formatSec(s: Double): String {
@@ -2613,6 +2770,9 @@ private fun openAudioPicker() {
     }
 
     override fun onDestroy() {
+        activeOperationCancellation?.cancel()
+        try { textToSpeech?.stop(); textToSpeech?.shutdown() } catch (_: Exception) {}
+        textToSpeech = null
         polling = false
         handler.removeCallbacksAndMessages(null)
         webView.evaluateJavascript(

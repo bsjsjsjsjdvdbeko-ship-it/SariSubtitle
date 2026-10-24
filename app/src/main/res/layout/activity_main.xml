@@ -99,7 +99,7 @@
             android:id="@+id/menuButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1.35"
+            android:layout_weight="1.15"
             android:minHeight="54dp"
             android:layout_marginEnd="4dp"
             android:textSize="13sp"
@@ -111,18 +111,29 @@
             android:id="@+id/loadSrtButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
+            android:layout_weight="0.88"
             android:minHeight="54dp"
-            android:layout_marginHorizontal="4dp"
+            android:layout_marginHorizontal="3dp"
             android:textSize="12sp"
             android:text="ملف ترجمة"
             android:contentDescription="اختر ملف ترجمة؛ يكتشف التطبيق اللغة ويترجمه إلى العربية أو يعرضه إذا كان عربيًا" />
 
         <Button
+            android:id="@+id/dubbingButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.78"
+            android:minHeight="54dp"
+            android:layout_marginHorizontal="3dp"
+            android:textSize="11sp"
+            android:text="دبلجة"
+            android:contentDescription="تشغيل أو إيقاف الدبلجة العربية؛ اضغط مطولاً لإظهار أو إخفاء الترجمة المكتوبة" />
+
+        <Button
             android:id="@+id/savedItemsButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="0.85"
+            android:layout_weight="0.70"
             android:minHeight="54dp"
             android:layout_marginStart="4dp"
             android:textSize="12sp"

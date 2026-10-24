@@ -95,7 +95,7 @@ class OpenAIWhisperService(
         totalSize += "--$boundary--\r\n".toByteArray(Charsets.UTF_8).size
         
         // ─── الاتصال ───
-        val connection = (URL(ENDPOINT).openConnection() as HttpURLConnection)
+        val connection = NetworkRequestRegistry.register(URL(ENDPOINT).openConnection() as HttpURLConnection)
         
         try {
             connection.requestMethod = "POST"
@@ -155,6 +155,7 @@ class OpenAIWhisperService(
             return parseResponse(responseBody, language)
         } finally {
             connection.disconnect()
+            NetworkRequestRegistry.unregister(connection)
         }
     }
 

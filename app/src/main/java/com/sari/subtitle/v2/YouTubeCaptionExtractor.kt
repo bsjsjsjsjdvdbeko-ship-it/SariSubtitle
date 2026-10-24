@@ -86,7 +86,7 @@ object YouTubeCaptionExtractor {
     private fun request(url: String, maxBytes: Int): String {
         var connection: HttpURLConnection? = null
         try {
-            connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            connection = NetworkRequestRegistry.register(URL(url).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 15_000
                 readTimeout = 25_000
                 instanceFollowRedirects = true
@@ -113,6 +113,7 @@ object YouTubeCaptionExtractor {
             return String(bytes, Charsets.UTF_8)
         } finally {
             connection?.disconnect()
+            connection?.let { NetworkRequestRegistry.unregister(it) }
         }
     }
 

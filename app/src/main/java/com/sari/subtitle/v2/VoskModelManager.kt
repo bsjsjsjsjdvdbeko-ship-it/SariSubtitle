@@ -70,7 +70,7 @@ object VoskModelManager {
         zip.delete(); deleteRecursively(partial)
         var connection: HttpURLConnection? = null
         try {
-            connection = (URL(model.url).openConnection() as HttpURLConnection).apply {
+            connection = NetworkRequestRegistry.register(URL(model.url).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 20000
                 readTimeout = 45000
                 instanceFollowRedirects = true
@@ -120,7 +120,7 @@ object VoskModelManager {
             if (!partial.renameTo(target)) throw IllegalStateException("تعذر تثبيت ملفات النموذج")
             progress("اكتمل تثبيت النموذج: ${model.title}")
         } finally {
-            connection?.disconnect(); zip.delete(); deleteRecursively(partial)
+            connection?.disconnect(); connection?.let { NetworkRequestRegistry.unregister(it) }; zip.delete(); deleteRecursively(partial)
         }
     }
 

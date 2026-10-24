@@ -38,12 +38,14 @@ object LanguageDetector {
 
             if (conn.responseCode !in 200..299) {
                 conn.disconnect()
+                NetworkRequestRegistry.unregister(conn)
                 return null
             }
 
             val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
             val response = reader.use { it.readText() }
             conn.disconnect()
+            NetworkRequestRegistry.unregister(conn)
 
             parseLanguage(response)
         } catch (e: Exception) {

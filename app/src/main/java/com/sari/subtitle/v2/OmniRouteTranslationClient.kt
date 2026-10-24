@@ -29,7 +29,7 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
                 .put(JSONObject().put("role", "system").put("content", "You are a careful subtitle translator. Output only the requested JSON."))
                 .put(JSONObject().put("role", "user").put("content", prompt)))
             .put("temperature", 0.2)
-        val response = requestJson("/chat/completions", payload.toString(), 45000)
+        val response = requestJson("/chat/completions", payload.toString(), 45000, 45000)
         val choices = response.optJSONArray("choices") ?: throw IOException("OmniRoute لم يُرجع choices.")
         val content = choices.optJSONObject(0)?.optJSONObject("message")?.optString("content", "")?.trim().orEmpty()
         if (content.isBlank()) throw IOException("OmniRoute أعاد رد ترجمة فارغًا.")
@@ -43,17 +43,17 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
     }
 
     fun testConnection(): String {
-        val response = requestJson("/models", null, 12000)
+        val response = requestJson("/models", null, 45000, 45000)
         val count = response.optJSONArray("data")?.length() ?: 0
         return "اتصال OmniRoute ناجح. النماذج الظاهرة: $count"
     }
 
-    private fun requestJson(path: String, payload: String?, timeoutMs: Int): JSONObject {
+    private fun requestJson(path: String, payload: String?, connectTimeoutMs: Int, readTimeoutMs: Int): JSONObject {
         val url = endpoint(path)
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+        val conn = NetworkRequestRegistry.register(URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = if (payload == null) "GET" else "POST"
-            connectTimeout = 10000
-            readTimeout = timeoutMs
+            connectTimeout = connectTimeoutMs
+            readTimeout = readTimeoutMs
             useCaches = false
             setRequestProperty("Accept", "application/json")
             val key = settings.omniRouteApiKey.trim()
@@ -78,7 +78,7 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
                 throw IOException("OmniRoute HTTP $code${if (detail.isNotBlank()) ": $detail" else ""}")
             }
             return JSONObject(body)
-        } finally { conn.disconnect() }
+        } finally { conn.disconnect(); NetworkRequestRegistry.unregister(conn) }
     }
 
     private fun endpoint(path: String): String {
