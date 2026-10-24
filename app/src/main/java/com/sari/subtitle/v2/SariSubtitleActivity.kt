@@ -805,6 +805,18 @@ class SariSubtitleActivity : AppCompatActivity() {
      * إلى خدمة استخراج خارجية، وقد تتطلب تسجيل الدخول أو لا تكون مدعومة.
      */
     private fun openPasteLinkFlow() {
+        // Hard guard: the internal processing engine must never route to SubWhisper,
+        // even if this legacy/paste-link button is tapped directly.
+        if (settings.processingEngine == SubtitleSettings.ENGINE_INTERNAL) {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("محرك Sari Subtitle الداخلي")
+                .setMessage("المحرك الداخلي لا يفتح SubWhisper. اختر ملف صوت/فيديو للتفريغ داخل التطبيق، أو اختر ملف SRT لترجمته.")
+                .setPositiveButton("اختيار صوت أو فيديو") { _, _ -> openVideoPickerForAutoTranscription() }
+                .setNeutralButton("ترجمة ملف SRT") { _, _ -> findViewById<Button>(R.id.translateSrtButton)?.performClick() }
+                .setNegativeButton("إلغاء", null)
+                .show()
+            return
+        }
         val clipboardText = try {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             if (clipboard.hasPrimaryClip() && (clipboard.primaryClip?.itemCount ?: 0) > 0) {
@@ -1637,14 +1649,18 @@ class SariSubtitleActivity : AppCompatActivity() {
                         val detectedLang = result.language.lowercase().take(2)
                         val isArabic = detectedLang == "ar"
                         val deepLKey = settings.deepLApiKey
-                        // Route through SrtTranslationService whenever Gemini or OmniRoute routing is configured.
-                        // This keeps OmniRoute selection/fallback available in the X-video translation path too.
+                        // Keep the existing Stage 20 processing/cache path; route only text translation.
                         val useTranslationRouter = settings.geminiApiKey.isNotBlank() || settings.omniRouteEnabled ||
                             settings.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE
                         val useDeepL = !useTranslationRouter && deepLKey.isNotBlank()
                         
                         if (!isArabic && detectedLang.isNotBlank() && detectedLang != "au") {
-                            val provider = when { useTranslationRouter -> if (settings.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE) "OmniRoute/Gemini" else "Gemini/OmniRoute"; useDeepL -> "DeepL"; else -> "Google/MyMemory" }
+                            // Gemini أولاً للترجمة النصية إذا كان مفتاحه محفوظاً، ثم DeepL/Google/MyMemory.
+                            val provider = when {
+                                useTranslationRouter -> if (settings.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE) "OmniRoute/Gemini" else "Gemini/OmniRoute"
+                                useDeepL -> "DeepL"
+                                else -> "Google/MyMemory"
+                            }
                             val progress2 = android.app.ProgressDialog(this).apply {
                                 setTitle("🌐 ترجمة → العربية ($provider)")
                                 setMessage("جارٍ الترجمة…")
@@ -2016,7 +2032,17 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         }
         val uri = try { Uri.parse(link) } catch (_: Exception) { null }
         if (link.isBlank() || uri == null || uri.scheme !in listOf("http", "https") || uri.host.isNullOrBlank()) {
-            openPasteLinkFlow()
+            if (settings.processingEngine == SubtitleSettings.ENGINE_INTERNAL) {
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("محرك Sari Subtitle الداخلي")
+                    .setMessage("لم يُعثر على رابط فيديو صالح. اختر ملف صوت/فيديو لتفريغه داخل التطبيق، أو اختر ملف SRT لترجمته. لن يتم فتح SubWhisper في المحرك الداخلي.")
+                    .setPositiveButton("اختيار صوت أو فيديو") { _, _ -> openVideoPickerForAutoTranscription() }
+                    .setNeutralButton("ترجمة ملف SRT") { _, _ -> findViewById<Button>(R.id.translateSrtButton)?.performClick() }
+                    .setNegativeButton("إلغاء", null)
+                    .show()
+            } else {
+                openPasteLinkFlow()
+            }
             return
         }
 
