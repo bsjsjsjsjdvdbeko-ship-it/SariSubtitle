@@ -25,6 +25,10 @@ android {
         }
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     buildTypes {
         // Prefer the configured release key for Debug when it is available, so a CI APK
         // can update an installation signed with that same key. Otherwise use Android's
