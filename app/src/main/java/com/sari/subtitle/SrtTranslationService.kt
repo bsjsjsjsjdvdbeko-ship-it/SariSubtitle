@@ -287,31 +287,69 @@ object SrtTranslationService {
             val batchTexts = batch.map { it.text }
             var batchResults: List<String>? = null
             var batchProvider = "none"
+            val providerFailures = mutableListOf<String>()
             val omniFirst = settings?.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE
+
+            // A provider is only marked successful after its response has been validated here,
+            // even if its client also performs validation internally.
+            fun validateBatch(provider: String, result: List<String>): List<String> {
+                if (result.size != batchTexts.size) {
+                    throw IOException("$provider أعاد ${result.size} نتيجة بينما المطلوب ${batchTexts.size}")
+                }
+                if (result.any { it.isBlank() }) {
+                    throw IOException("$provider أعاد نتيجة ترجمة فارغة")
+                }
+                return result.map { it.trim() }
+            }
+
+            fun logAttempt(provider: String, model: String, startedAt: Long, status: String,
+                           result: String = "", detail: String = "") {
+                if (context != null) OperationLogStore.add(
+                    context, "محاولة مزود ترجمة SRT", provider, model,
+                    (android.os.SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L),
+                    status, result, detail
+                )
+            }
+
             fun tryOmniRoute(): List<String>? {
                 if (!omniRouteAvailable || settings == null) return null
                 if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+                val attemptStarted = android.os.SystemClock.elapsedRealtime()
+                val model = settings.omniRouteTextModel.trim().ifBlank { "auto" }
+                logAttempt("OmniRoute", model, attemptStarted, "قيد التنفيذ", "${batchTexts.size} نص", "جارٍ الاتصال بخادم OmniRoute")
                 return try {
-                    val result = OmniRouteTranslationClient(settings).translateBatch(batchTexts, sourceLang, targetLang)
+                    val result = validateBatch("OmniRoute", OmniRouteTranslationClient(settings).translateBatch(batchTexts, sourceLang, targetLang))
                     batchProvider = "OmniRoute"
+                    logAttempt("OmniRoute", model, attemptStarted, "نجاح", "${result.size}/${batchTexts.size} ترجمة صالحة", "$sourceLang→$targetLang; تم التحقق من الرد")
                     result
                 } catch (e: Exception) {
                     if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
-                    Log.e(TAG, "OmniRoute batch failed; configured route will continue to next text provider. source=$sourceLang target=$targetLang batchSize=${batchTexts.size} reason=${e.message}", e)
+                    val reason = (e.message ?: e.javaClass.simpleName).take(350)
+                    providerFailures += "OmniRoute: $reason"
+                    Log.e(TAG, "OmniRoute batch failed; configured route will continue to next text provider. source=$sourceLang target=$targetLang batchSize=${batchTexts.size} reason=$reason", e)
+                    logAttempt("OmniRoute", model, attemptStarted, "فشل", "لم تُقبل أي نتيجة", reason)
                     omniRouteAvailable = false
                     null
                 }
             }
+
             fun tryGemini(): List<String>? {
                 if (!geminiAvailable) return null
                 if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+                val attemptStarted = android.os.SystemClock.elapsedRealtime()
+                val model = "gemini-2.5-flash"
+                logAttempt("Gemini", model, attemptStarted, "قيد التنفيذ", "${batchTexts.size} نص", "جارٍ طلب الترجمة")
                 return try {
-                    val result = GeminiTranslationService.translateBatch(batchTexts, sourceLang, targetLang, geminiKey)
+                    val result = validateBatch("Gemini", GeminiTranslationService.translateBatch(batchTexts, sourceLang, targetLang, geminiKey))
                     batchProvider = "Gemini"
+                    logAttempt("Gemini", model, attemptStarted, "نجاح", "${result.size}/${batchTexts.size} ترجمة صالحة", "$sourceLang→$targetLang; تم التحقق من الرد")
                     result
                 } catch (e: Exception) {
                     if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
-                    Log.e(TAG, "Gemini translation batch failed; configured route will continue to next text provider. source=$sourceLang target=$targetLang batchSize=${batchTexts.size} reason=${e.message}", e)
+                    val reason = (e.message ?: e.javaClass.simpleName).take(350)
+                    providerFailures += "Gemini: $reason"
+                    Log.e(TAG, "Gemini translation batch failed; configured route will continue to next text provider. source=$sourceLang target=$targetLang batchSize=${batchTexts.size} reason=$reason", e)
+                    logAttempt("Gemini", model, attemptStarted, "فشل", "لم تُقبل أي نتيجة", reason)
                     geminiAvailable = false
                     null
                 }
@@ -325,11 +363,14 @@ object SrtTranslationService {
                 batchResults = tryGemini() ?: tryOmniRoute()
             }
 
+            var primaryResultsUsed = 0
+            var textFallbackResultsUsed = 0
             for ((batchIndex, cue) in batch.withIndex()) {
                 if (shouldCancel()) throw java.util.concurrent.CancellationException("ألغى المستخدم العملية")
                 val providerResult = batchResults?.getOrNull(batchIndex)?.takeIf { it.isNotBlank() }
+                if (providerResult != null) primaryResultsUsed++ else textFallbackResultsUsed++
                 val translated = providerResult ?: try {
-                    val fallback = translateText(cue.text, sourceLang, targetLang, settings, shouldCancel)
+                    val fallback = translateText(cue.text, sourceLang, targetLang, settings, shouldCancel, context)
                     if (batchProvider == "none" || providerResult == null) {
                         Log.i(TAG, "cue=${cue.blockIndex + 1} provider=additional-text-fallback reason=Gemini/OmniRoute returned no cue or failed")
                     }
@@ -348,12 +389,29 @@ object SrtTranslationService {
                 onProgress(completed, total)
             }
             if (context != null) {
-                val actualProvider = if (batchProvider != "none" && batchResults != null) batchProvider else "بدائل نصية (Azure/Hugging Face/DeepL)"
-                val model = when (actualProvider) {
-                    "Gemini" -> "Gemini translation batch"
-                    "OmniRoute" -> "configured OmniRoute model"
+                val actualProvider = when {
+                    primaryResultsUsed > 0 && textFallbackResultsUsed > 0 -> "$batchProvider + بدائل نصية"
+                    primaryResultsUsed > 0 -> batchProvider
+                    else -> "بدائل نصية (Azure/Hugging Face/DeepL)"
+                }
+                val model = when (batchProvider) {
+                    "Gemini" -> "gemini-2.5-flash"
+                    "OmniRoute" -> settings?.omniRouteTextModel?.trim().orEmpty().ifBlank { "auto" }
                     else -> "provider fallback chain"
                 }
+                val routeSummary = when {
+                    batchProvider != "none" && providerFailures.isNotEmpty() ->
+                        "${providerFailures.joinToString(" → ")} → $batchProvider نجح"
+                    batchProvider != "none" -> "$batchProvider نجح بعد التحقق من النتائج"
+                    else -> "لم تنجح دفعة Gemini/OmniRoute؛ تم استخدام البدائل النصية للمقاطع"
+                }
+                val details = buildList {
+                    add("$sourceLang→$targetLang")
+                    add("تسلسل المحاولات: $routeSummary")
+                    add("providerResults=$primaryResultsUsed")
+                    add("textFallbackResults=$textFallbackResultsUsed")
+                    if (providerFailures.isNotEmpty()) add("providerFailures=${providerFailures.joinToString(" | ")}")
+                }.joinToString("; ")
                 OperationLogStore.add(
                     context,
                     "ترجمة SRT",
@@ -361,8 +419,8 @@ object SrtTranslationService {
                     model,
                     (android.os.SystemClock.elapsedRealtime() - batchStarted).coerceAtLeast(0L),
                     "نجاح",
-                    "${batch.size} مقطع؛ ${batchResults?.count { !it.isNullOrBlank() } ?: 0} نتائج دفعة",
-                    "$sourceLang→$targetLang; fallback cues may use another provider"
+                    "${batch.size} مقطع؛ مزود الدفعة=$primaryResultsUsed؛ بدائل نصية=$textFallbackResultsUsed",
+                    details
                 )
             }
         }
@@ -410,30 +468,75 @@ object SrtTranslationService {
         } catch (_: Exception) { /* Cache failures must not fail translation. */ }
     }
 
-    private fun translateText(text: String, sourceLang: String, targetLang: String, settings: SubtitleSettings?, shouldCancel: () -> Boolean): String {
+    private fun translateText(
+        text: String,
+        sourceLang: String,
+        targetLang: String,
+        settings: SubtitleSettings?,
+        shouldCancel: () -> Boolean,
+        context: Context?
+    ): String {
         if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
         if (text.isBlank()) return text
         if (text.length > 450) throw IllegalArgumentException("أحد مقاطع الترجمة طويل جداً؛ قصّره أو قسّمه")
         val failures = mutableListOf<String>()
+
+        fun recordFallbackAttempt(provider: String, model: String, startedAt: Long, status: String,
+                                  result: String = "", detail: String = "") {
+            if (context != null) OperationLogStore.add(
+                context, "محاولة مزود ترجمة SRT", provider, model,
+                (android.os.SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L),
+                status, result, detail
+            )
+        }
+
         if (settings != null && settings.azureTranslatorKey.isNotBlank()) {
-            try { return AdditionalTranslationProviders.azure(text, sourceLang, targetLang, settings.azureTranslatorKey, settings.azureTranslatorRegion) }
-            catch (e: Exception) { if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية"); failures += "Azure: ${e.message.orEmpty().take(100)}" }
+            val started = android.os.SystemClock.elapsedRealtime()
+            recordFallbackAttempt("Azure Translator", "Azure Translator API", started, "قيد التنفيذ", "مقطع واحد", "$sourceLang→$targetLang")
+            try {
+                val translated = AdditionalTranslationProviders.azure(text, sourceLang, targetLang, settings.azureTranslatorKey, settings.azureTranslatorRegion)
+                    .takeIf { it.isNotBlank() } ?: throw IOException("Azure Translator أعاد ترجمة فارغة")
+                recordFallbackAttempt("Azure Translator", "Azure Translator API", started, "نجاح", "ترجمة صالحة", "$sourceLang→$targetLang; تم التحقق من النص")
+                return translated
+            } catch (e: Exception) {
+                if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+                val reason = (e.message ?: e.javaClass.simpleName).take(140)
+                failures += "Azure Translator: $reason"
+                recordFallbackAttempt("Azure Translator", "Azure Translator API", started, "فشل", "لم تُقبل النتيجة", reason)
+            }
         }
         if (settings != null && settings.huggingFaceToken.isNotBlank()) {
-            try { return AdditionalTranslationProviders.huggingFace(text, sourceLang, targetLang, settings.huggingFaceToken) }
-            catch (e: Exception) { if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية"); failures += "Hugging Face: ${e.message.orEmpty().take(100)}" }
+            val started = android.os.SystemClock.elapsedRealtime()
+            recordFallbackAttempt("Hugging Face", "Hugging Face translation", started, "قيد التنفيذ", "مقطع واحد", "$sourceLang→$targetLang")
+            try {
+                val translated = AdditionalTranslationProviders.huggingFace(text, sourceLang, targetLang, settings.huggingFaceToken)
+                    .takeIf { it.isNotBlank() } ?: throw IOException("Hugging Face أعاد ترجمة فارغة")
+                recordFallbackAttempt("Hugging Face", "Hugging Face translation", started, "نجاح", "ترجمة صالحة", "$sourceLang→$targetLang; تم التحقق من النص")
+                return translated
+            } catch (e: Exception) {
+                if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+                val reason = (e.message ?: e.javaClass.simpleName).take(140)
+                failures += "Hugging Face: $reason"
+                recordFallbackAttempt("Hugging Face", "Hugging Face translation", started, "فشل", "لم تُقبل النتيجة", reason)
+            }
         }
         var attempt = 0
         while (true) {
+            val started = android.os.SystemClock.elapsedRealtime()
+            recordFallbackAttempt("DeepL", "DeepL API", started, "قيد التنفيذ", "مقطع واحد", "$sourceLang→$targetLang; attempt=${attempt + 1}")
             try {
-                return DeepLTranslationService.translateTextOnly(text, sourceLang, targetLang, settings?.deepLApiKey.orEmpty())
+                val translated = DeepLTranslationService.translateTextOnly(text, sourceLang, targetLang, settings?.deepLApiKey.orEmpty())
+                    .takeIf { it.isNotBlank() } ?: throw IOException("DeepL أعاد ترجمة فارغة")
+                recordFallbackAttempt("DeepL", "DeepL API", started, "نجاح", "ترجمة صالحة", "$sourceLang→$targetLang; تم التحقق من النص")
+                return translated
             } catch (e: Exception) {
                 if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
                 attempt++
                 val message = e.message.orEmpty()
+                recordFallbackAttempt("DeepL", "DeepL API", started, "فشل", "لم تُقبل النتيجة", message.take(200))
                 val retryable = e is IOException || Regex("HTTP (429|5\\d\\d)", RegexOption.IGNORE_CASE).containsMatchIn(message)
                 if (!retryable || attempt >= 2) {
-                    failures += "المزودات الأساسية: ${message.take(140)}"
+                    failures += "DeepL: ${message.take(140)}"
                     throw IllegalStateException("فشلت الترجمة عبر المزودات المتاحة. ${failures.joinToString(" | ")}", e)
                 }
                 try { Thread.sleep(500L * attempt) } catch (interrupted: InterruptedException) {

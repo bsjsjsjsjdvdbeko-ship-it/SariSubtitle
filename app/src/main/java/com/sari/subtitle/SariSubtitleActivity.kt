@@ -814,8 +814,8 @@ class SariSubtitleActivity : AppCompatActivity() {
                 cancellation.check()
                 val cues = SrtParser.parse(translated.byteInputStream(Charsets.UTF_8))
                 if (cues.isEmpty()) throw IllegalStateException("لم ينتج ملف SRT صالح")
-                recordOperation("ترجمة SRT تلقائية", translationRouteLabel(), "provider routing", translationStarted,
-                    "نجاح", "${cues.size} مقطع", "حُفظت التوقيتات الأصلية")
+                recordOperation("ترجمة SRT تلقائية", "SrtTranslationService", translationRouteLabel(), translationStarted,
+                    "نجاح", "${cues.size} مقطع", "هذا هو المسار المختار وليس ادعاءً بنجاح مزود بعينه؛ راجع أحداث «محاولة مزود ترجمة SRT» لمعرفة المزود الفعلي وأسباب الفشل.")
                 runOnUiThread {
                     if (isFinishing || cancellation.isCancelled()) { progress.dismiss(); pendingWhisperSrt = null; Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
                     progress.dismiss()
@@ -836,7 +836,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                     Toast.makeText(this, if (cacheSaved || librarySaved) "اكتملت الترجمة وحُفظت داخل التطبيق" else "اكتملت الترجمة لكن تعذّر حفظ الملف", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
-                recordOperation("ترجمة SRT تلقائية", translationRouteLabel(), "provider routing", translationStarted,
+                recordOperation("ترجمة SRT تلقائية", "SrtTranslationService", translationRouteLabel(), translationStarted,
                     if (cancellation.isCancelled() || e is java.util.concurrent.CancellationException) "أُلغيت" else "فشل",
                     "", (e.message ?: "خطأ غير معروف").take(400))
                 runOnUiThread {
@@ -1057,8 +1057,9 @@ class SariSubtitleActivity : AppCompatActivity() {
                 })
                 cancellation.check()
                 pendingTranslatedSrt = translated
-                recordOperation("ترجمة ملف SRT", translationRouteLabel(), "provider routing", translationStarted,
-                    "نجاح", "${SrtParser.parse(translated.byteInputStream(Charsets.UTF_8)).size} مقطع", "تم تجهيز الملف للحفظ")
+                recordOperation("ترجمة ملف SRT", "SrtTranslationService", translationRouteLabel(), translationStarted,
+                    "نجاح", "${SrtParser.parse(translated.byteInputStream(Charsets.UTF_8)).size} مقطع",
+                    "هذا هو المسار المختار وليس ادعاءً بنجاح مزود بعينه؛ راجع أحداث «محاولة مزود ترجمة SRT» لمعرفة المزود الفعلي وأسباب الفشل.")
                 runOnUiThread {
                     progress.dismiss()
                     if (cancellation.isCancelled()) { pendingTranslatedSrt = null; Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
@@ -1070,7 +1071,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                     startActivityForResult(create, REQ_SAVE_TRANSLATED_SRT)
                 }
             } catch (e: Exception) {
-                recordOperation("ترجمة ملف SRT", translationRouteLabel(), "provider routing", translationStarted,
+                recordOperation("ترجمة ملف SRT", "SrtTranslationService", translationRouteLabel(), translationStarted,
                     if (cancellation.isCancelled() || e is java.util.concurrent.CancellationException) "أُلغيت" else "فشل",
                     "", (e.message ?: "خطأ غير معروف").take(400))
                 runOnUiThread {
@@ -3079,10 +3080,20 @@ private fun openAudioPicker() {
 
     private fun refreshOperationLogPanel() {
         if (!::operationLogText.isInitialized) return
-        val latest = OperationLogStore.events(this).firstOrNull()
-        operationLogText.text = if (latest == null) "سجل العمليات: جاهز" else
-            "${latest.operation} · ${latest.status} · ${latest.provider}/${latest.model} · ${latest.durationMs}ms" +
-                if (latest.result.isNotBlank()) " · ${latest.result}" else ""
+        val entries = OperationLogStore.events(this)
+        val latest = entries.firstOrNull()
+        // The activity-level completion entry describes the selected route, not the provider
+        // that actually answered. Prefer the latest provider-attempt event for that same SRT
+        // operation when it occurred after the service's most recent start/cache event.
+        val latestSrtServiceEvent = entries.firstOrNull { it.operation == "ترجمة SRT" }
+        val latestProviderAttempt = entries.firstOrNull { it.operation == "محاولة مزود ترجمة SRT" }
+        val translationSummary = latest?.operation in setOf("ترجمة SRT تلقائية", "ترجمة ملف SRT")
+        val display = if (translationSummary && latestProviderAttempt != null && latestSrtServiceEvent != null &&
+            latestProviderAttempt.time >= latestSrtServiceEvent.time) latestProviderAttempt else latest
+        operationLogText.text = if (display == null) "سجل العمليات: جاهز" else
+            "${display.operation} · ${display.status} · ${display.provider}/${display.model} · ${display.durationMs}ms" +
+                (if (display.result.isNotBlank()) " · ${display.result}" else "") +
+                (if (display.detail.isNotBlank()) " · ${display.detail}" else "")
     }
 
     /** Updates the visible status area from workflows that restore saved subtitles. */
