@@ -162,18 +162,6 @@ object SrtTranslationService {
                 onProgress(finished.coerceAtMost(totalForeign), totalForeign)
             }
             val extras = returnedByTimestamp.values.sumOf { it.size }
-            if (context != null) {
-                val actualProvider = if (batchProvider != "none" && batchResults != null) batchProvider else "بدائل نصية (Azure/Hugging Face/DeepL)"
-                val model = when (actualProvider) {
-                    "Gemini" -> "Gemini translation batch"
-                    "OmniRoute" -> "configured OmniRoute model"
-                    else -> "provider fallback chain"
-                }
-                OperationLogStore.add(context, "ترجمة SRT", actualProvider, model,
-                    (android.os.SystemClock.elapsedRealtime() - batchStarted).coerceAtLeast(0L), "نجاح",
-                    "${batch.size} مقطع؛ ${batchResults?.count { !it.isNullOrBlank() } ?: 0} نتائج دفعة",
-                    "${sourceLang}→${targetLang}; fallback cues may use another provider")
-            }
             if (extras > 0) Log.w(TAG, "Ignored $extras extra translated cue(s) for language=$language; original SRT timing was retained")
         }
         if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
@@ -358,6 +346,24 @@ object SrtTranslationService {
                 writePersistentCache(context, cue.cacheKey, translated)
                 completed++
                 onProgress(completed, total)
+            }
+            if (context != null) {
+                val actualProvider = if (batchProvider != "none" && batchResults != null) batchProvider else "بدائل نصية (Azure/Hugging Face/DeepL)"
+                val model = when (actualProvider) {
+                    "Gemini" -> "Gemini translation batch"
+                    "OmniRoute" -> "configured OmniRoute model"
+                    else -> "provider fallback chain"
+                }
+                OperationLogStore.add(
+                    context,
+                    "ترجمة SRT",
+                    actualProvider,
+                    model,
+                    (android.os.SystemClock.elapsedRealtime() - batchStarted).coerceAtLeast(0L),
+                    "نجاح",
+                    "${batch.size} مقطع؛ ${batchResults?.count { !it.isNullOrBlank() } ?: 0} نتائج دفعة",
+                    "$sourceLang→$targetLang; fallback cues may use another provider"
+                )
             }
         }
         return output.joinToString("\r\n\r\n") + "\r\n"
