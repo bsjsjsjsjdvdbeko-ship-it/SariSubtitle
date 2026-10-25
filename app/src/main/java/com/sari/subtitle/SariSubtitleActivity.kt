@@ -2292,6 +2292,18 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         }
 
         urlInput.setText(link)
+        // If a cached SRT exists but WebView is still showing the home page or another
+        // video, navigate first. Returning immediately after restoreCachedSrt() used to
+        // load the cues into memory while leaving the old page on screen, so the user saw
+        // no matching video/subtitles after pasting a previously translated URL.
+        if (storage.has(link) && !sameVideoUrl(link, webView.url.orEmpty())) {
+            urlInput.setText(link)
+            statusText.visibility = android.view.View.VISIBLE
+            statusText.text = "تم العثور على ترجمة محفوظة لهذا الفيديو. جارٍ فتح الفيديو واستعادة الترجمة…"
+            webView.loadUrl(link)
+            return
+        }
+
         if (restoreCachedSrt(link)) {
             statusText.visibility = android.view.View.VISIBLE
             statusText.text = "تم تحميل الترجمة المحفوظة لهذا الرابط تلقائياً."
