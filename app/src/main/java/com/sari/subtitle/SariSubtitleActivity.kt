@@ -37,6 +37,7 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import androidx.webkit.WebViewFeature
 import org.json.JSONObject
 import java.io.IOException
+import java.io.File
 
 /**
  * Sari Subtitle — المرحلة 3.3
@@ -62,6 +63,7 @@ class SariSubtitleActivity : AppCompatActivity() {
 
     private lateinit var urlInput: EditText
     private lateinit var statusText: TextView
+    private lateinit var operationLogText: TextView
     private lateinit var webView: WebView
     private lateinit var subtitleOverlay: SubtitleOverlay
 
@@ -119,6 +121,10 @@ class SariSubtitleActivity : AppCompatActivity() {
 
         urlInput = findViewById(R.id.urlInput)
         statusText = findViewById(R.id.statusText)
+        operationLogText = findViewById(R.id.operationLogText)
+        OperationLogStore.onChanged = { runOnUiThread { if (!isFinishing) refreshOperationLogPanel() } }
+        findViewById<Button>(R.id.operationLogButton).setOnClickListener { OperationLogStore.showHistory(this) }
+        refreshOperationLogPanel()
         webView = findViewById(R.id.webView)
         subtitleOverlay = findViewById(R.id.subtitleOverlay)
 
@@ -782,6 +788,7 @@ class SariSubtitleActivity : AppCompatActivity() {
 
     /** Translate a fetched/generated SRT to Arabic, preserve cue timestamps, show it, and cache it. */
     private fun translateAndShowSrtAutomatically(videoUrl: String, sourceSrt: String, fileName: String) {
+        val translationStarted = android.os.SystemClock.elapsedRealtime()
         val cancellation = OperationCancellation()
         beginTrackedOperation(cancellation)
         val progress = ProgressDialog(this).apply {
@@ -807,6 +814,8 @@ class SariSubtitleActivity : AppCompatActivity() {
                 cancellation.check()
                 val cues = SrtParser.parse(translated.byteInputStream(Charsets.UTF_8))
                 if (cues.isEmpty()) throw IllegalStateException("لم ينتج ملف SRT صالح")
+                recordOperation("ترجمة SRT تلقائية", translationRouteLabel(), "provider routing", translationStarted,
+                    "نجاح", "${cues.size} مقطع", "حُفظت التوقيتات الأصلية")
                 runOnUiThread {
                     if (isFinishing || cancellation.isCancelled()) { progress.dismiss(); pendingWhisperSrt = null; Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
                     progress.dismiss()
@@ -827,6 +836,9 @@ class SariSubtitleActivity : AppCompatActivity() {
                     Toast.makeText(this, if (cacheSaved || librarySaved) "اكتملت الترجمة وحُفظت داخل التطبيق" else "اكتملت الترجمة لكن تعذّر حفظ الملف", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
+                recordOperation("ترجمة SRT تلقائية", translationRouteLabel(), "provider routing", translationStarted,
+                    if (cancellation.isCancelled() || e is java.util.concurrent.CancellationException) "أُلغيت" else "فشل",
+                    "", (e.message ?: "خطأ غير معروف").take(400))
                 runOnUiThread {
                     if (!isFinishing) {
                         progress.dismiss()
@@ -1017,6 +1029,7 @@ class SariSubtitleActivity : AppCompatActivity() {
     }
 
     private fun translateSelectedSrt(uri: Uri) {
+        val translationStarted = android.os.SystemClock.elapsedRealtime()
         val raw = try {
             contentResolver.openInputStream(uri)?.use { SrtParser.decode(it) }
         } catch (e: Exception) { null }
@@ -1044,6 +1057,8 @@ class SariSubtitleActivity : AppCompatActivity() {
                 })
                 cancellation.check()
                 pendingTranslatedSrt = translated
+                recordOperation("ترجمة ملف SRT", translationRouteLabel(), "provider routing", translationStarted,
+                    "نجاح", "${SrtParser.parse(translated.byteInputStream(Charsets.UTF_8)).size} مقطع", "تم تجهيز الملف للحفظ")
                 runOnUiThread {
                     progress.dismiss()
                     if (cancellation.isCancelled()) { pendingTranslatedSrt = null; Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
@@ -1055,6 +1070,9 @@ class SariSubtitleActivity : AppCompatActivity() {
                     startActivityForResult(create, REQ_SAVE_TRANSLATED_SRT)
                 }
             } catch (e: Exception) {
+                recordOperation("ترجمة ملف SRT", translationRouteLabel(), "provider routing", translationStarted,
+                    if (cancellation.isCancelled() || e is java.util.concurrent.CancellationException) "أُلغيت" else "فشل",
+                    "", (e.message ?: "خطأ غير معروف").take(400))
                 runOnUiThread {
                     progress.dismiss()
                     pendingTranslatedSrt = null
@@ -2017,8 +2035,8 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
             VoskModelManager.isInstalled(applicationContext, VoskModelManager.ENGLISH)
         val cloudProviders = when (selected) {
             SubtitleSettings.STT_LOCAL -> emptyList()
-            // المطلوب في الوضع التلقائي: Groq إن كان المفتاح صالحاً، ثم Vosk المحلي عند توفر النموذج.
-            SubtitleSettings.STT_AUTO -> listOf(SubtitleSettings.STT_GROQ)
+            // Keep runtime behavior aligned with settings: Groq -> Deepgram -> local Vosk.
+            SubtitleSettings.STT_AUTO -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
             SubtitleSettings.STT_DEEPGRAM -> listOf(SubtitleSettings.STT_DEEPGRAM, SubtitleSettings.STT_GROQ)
             SubtitleSettings.STT_GROQ -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
             else -> listOf(SubtitleSettings.STT_OPENAI)
@@ -2037,9 +2055,27 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
             throw IllegalStateException(message)
         }
         val failures = mutableListOf<String>()
+        val operationStarted = android.os.SystemClock.elapsedRealtime()
+        recordOperation("تحويل الصوت إلى نص", "اختيار تلقائي", "Groq → Deepgram → Vosk", operationStarted,
+            "قيد التنفيذ", "${providers.size} مزود متاح", "selected=$selected")
         for (provider in providers.distinct()) {
+            val attemptStarted = android.os.SystemClock.elapsedRealtime()
+            val providerName = when (provider) {
+                SubtitleSettings.STT_DEEPGRAM -> "Deepgram"
+                SubtitleSettings.STT_OPENAI -> "OpenAI"
+                SubtitleSettings.STT_LOCAL -> "Vosk"
+                else -> "Groq"
+            }
+            val modelName = when (provider) {
+                SubtitleSettings.STT_DEEPGRAM -> "Nova-3"
+                SubtitleSettings.STT_OPENAI -> "Whisper API"
+                SubtitleSettings.STT_LOCAL -> "Vosk offline"
+                else -> "Whisper"
+            }
             try {
                 val result = call(provider)
+                recordOperation("تحويل الصوت إلى نص", providerName, modelName, attemptStarted, "نجاح",
+                    "${result.segmentCount} مقطع", "اللغة=${result.language}; selected=${selected}")
                 if (provider != selected) {
                     val label = when (provider) {
                         SubtitleSettings.STT_DEEPGRAM -> "Deepgram"
@@ -2064,9 +2100,13 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                     SubtitleSettings.STT_LOCAL -> "Vosk المحلي"
                     else -> "Groq"
                 }
-                failures += "$label: ${e.message ?: "فشل غير معروف"}"
+                val error = (e.message ?: "فشل غير معروف").take(240)
+                failures += "$label: $error"
+                recordOperation("محاولة تحويل الصوت إلى نص", providerName, modelName, attemptStarted, "فشل", "", error)
             }
         }
+        recordOperation("تحويل الصوت إلى نص", "لا يوجد", "fallback exhausted", operationStarted, "فشل",
+            "${failures.size} محاولات", failures.joinToString(" | ").take(450))
         throw IllegalStateException("فشلت محاولات التفريغ المتاحة: ${failures.joinToString(" | ")}")
     }
 
@@ -2933,6 +2973,7 @@ private fun openAudioPicker() {
     }
 
     private fun exportDubbingWav(uri: Uri) {
+        val operationStarted = android.os.SystemClock.elapsedRealtime()
         val exportCues = repo.allCues()
         if (exportCues.isEmpty()) {
             Toast.makeText(this, "تعذر استعادة مقاطع SRT للتصدير؛ أعد تحميل ملف الترجمة", Toast.LENGTH_LONG).show()
@@ -2945,6 +2986,8 @@ private fun openAudioPicker() {
             findViewById<Button>(R.id.dubbingButton).text = "دبلجة"
             pollCurrentTimeOnce()
         }
+        recordOperation("تصدير دبلجة WAV", "Android TextToSpeech", textToSpeech?.defaultEngine ?: "unknown",
+            operationStarted, "قيد التنفيذ", "${exportCues.size} مقطع", "voice=${textToSpeech?.voice?.name ?: "unknown"}")
         val dialog = ProgressDialog(this).apply {
             setTitle("تصدير الدبلجة العربية")
             setMessage("جارٍ توليد مقاطع WAV مع توقيتات SRT…")
@@ -2967,16 +3010,29 @@ private fun openAudioPicker() {
                         } }
                     )
                 }
+                // Re-open the exact SAF document after closing the writer. A successful write alone is not enough.
+                val readback = File(cacheDir, "sari_dub_readback_${System.currentTimeMillis()}.wav")
+                try {
+                    val input = contentResolver.openInputStream(uri) ?: throw IOException("تعذر إعادة فتح WAV المحفوظ لفحصه")
+                    input.use { src -> readback.outputStream().buffered().use { dst -> src.copyTo(dst) } }
+                    val validation = WavDubbingExporter.validateWav(readback)
+                    val engineName = textToSpeech?.defaultEngine ?: "محرك TTS غير معروف"
+                    val voiceName = textToSpeech?.voice?.name ?: "صوت غير معروف"
+                    recordOperation("تصدير دبلجة WAV", "Android TextToSpeech", "$engineName / $voiceName", operationStarted,
+                        "نجاح — تم التحقق", "${readback.length()} بايت؛ ${exportCues.size} مقطع", validation)
+                } finally { readback.delete() }
                 runOnUiThread {
                     if (!isFinishing) {
                         dialog.dismiss()
                         statusText.visibility = android.view.View.VISIBLE
-                        statusText.text = "تم تصدير WAV للدبلجة العربية مع محاذاة توقيتات SRT. راجع سجل SariDubbingExport للمقاطع التي تجاوز صوتها المدة المتاحة."
+                        statusText.text = "تم حفظ WAV واجتاز فحص RIFF/WAVE وPCM-16 بعد إعادة فتح الملف."
                         Toast.makeText(this, "تم حفظ ملف الدبلجة WAV", Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.e("SariDubbingExport", "WAV export failed", e)
+                android.util.Log.e("SariDubbingExport", "WAV export failed or readback validation failed", e)
+                recordOperation("تصدير دبلجة WAV", "Android TextToSpeech", textToSpeech?.defaultEngine ?: "unknown",
+                    operationStarted, "فشل", "", (e.message ?: "خطأ غير معروف").take(400))
                 runOnUiThread {
                     if (!isFinishing) {
                         dialog.dismiss()
@@ -3012,6 +3068,21 @@ private fun openAudioPicker() {
         val m = total / 60
         val sec = total % 60
         return "%02d:%02d".format(m, sec)
+    }
+
+    private fun recordOperation(operation: String, provider: String, model: String, startedAt: Long,
+                                status: String, result: String = "", detail: String = "") {
+        OperationLogStore.add(this, operation, provider, model,
+            (android.os.SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L), status, result, detail)
+        runOnUiThread { if (!isFinishing) refreshOperationLogPanel() }
+    }
+
+    private fun refreshOperationLogPanel() {
+        if (!::operationLogText.isInitialized) return
+        val latest = OperationLogStore.events(this).firstOrNull()
+        operationLogText.text = if (latest == null) "سجل العمليات: جاهز" else
+            "${latest.operation} · ${latest.status} · ${latest.provider}/${latest.model} · ${latest.durationMs}ms" +
+                if (latest.result.isNotBlank()) " · ${latest.result}" else ""
     }
 
     /** Updates the visible status area from workflows that restore saved subtitles. */

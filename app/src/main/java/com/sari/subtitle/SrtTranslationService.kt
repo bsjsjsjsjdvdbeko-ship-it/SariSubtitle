@@ -35,6 +35,8 @@ object SrtTranslationService {
         shouldCancel: () -> Boolean = { false },
         onProgress: (Int, Int) -> Unit = { _, _ -> }
     ): String {
+        if (context != null) OperationLogStore.add(context, "ترجمة SRT", "اختيار حسب الإعدادات", "Gemini / OmniRoute / بدائل نصية",
+            0L, "قيد التنفيذ", "جارٍ معالجة المقاطع", "target=$targetLang")
         val normalized = source.removePrefix("\uFEFF").replace("\r\n", "\n").replace('\r', '\n')
         // Vosk outputs may vary in blank-line formatting; identify cue boundaries by timestamps.
         val blocks = splitSrtCuesByTimestamp(normalized)
@@ -71,6 +73,8 @@ object SrtTranslationService {
         if (grouped.isEmpty()) {
             onDetected(target)
             onProgress(1, 1)
+            if (context != null) OperationLogStore.add(context, "ترجمة SRT", "بدون طلب مزود", "لا يلزم ترجمة", 0L,
+                "نجاح", "لا توجد مقاطع أجنبية تحتاج ترجمة", "target=$targetLang")
             return source
         }
         if (detectedLanguages.isEmpty()) {
@@ -158,6 +162,18 @@ object SrtTranslationService {
                 onProgress(finished.coerceAtMost(totalForeign), totalForeign)
             }
             val extras = returnedByTimestamp.values.sumOf { it.size }
+            if (context != null) {
+                val actualProvider = if (batchProvider != "none" && batchResults != null) batchProvider else "بدائل نصية (Azure/Hugging Face/DeepL)"
+                val model = when (actualProvider) {
+                    "Gemini" -> "Gemini translation batch"
+                    "OmniRoute" -> "configured OmniRoute model"
+                    else -> "provider fallback chain"
+                }
+                OperationLogStore.add(context, "ترجمة SRT", actualProvider, model,
+                    (android.os.SystemClock.elapsedRealtime() - batchStarted).coerceAtLeast(0L), "نجاح",
+                    "${batch.size} مقطع؛ ${batchResults?.count { !it.isNullOrBlank() } ?: 0} نتائج دفعة",
+                    "${sourceLang}→${targetLang}; fallback cues may use another provider")
+            }
             if (extras > 0) Log.w(TAG, "Ignored $extras extra translated cue(s) for language=$language; original SRT timing was retained")
         }
         if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
@@ -223,6 +239,8 @@ object SrtTranslationService {
         shouldCancel: () -> Boolean = { false },
         onProgress: (Int, Int) -> Unit = { _, _ -> }
     ): String {
+        if (context != null) OperationLogStore.add(context, "ترجمة SRT", "اختيار حسب الإعدادات", "Gemini / OmniRoute / بدائل نصية",
+            0L, "قيد التنفيذ", "جارٍ معالجة المقاطع", "$sourceLang→$targetLang")
         require(sourceLang.isNotBlank() && targetLang.isNotBlank()) {
             "اختر لغة المصدر واللغة المستهدفة"
         }
@@ -273,8 +291,11 @@ object SrtTranslationService {
         }
 
         // Gemini receives up to eight subtitle texts per request to reduce API calls on long files.
+        if (pending.isEmpty() && context != null) OperationLogStore.add(context, "ترجمة SRT", "ذاكرة التخزين المؤقت", "SRT translation cache", 0L,
+            "نجاح", "${total} مقطع", "لم يلزم طلب شبكة")
         for (batch in pending.chunked(8)) {
             if (shouldCancel()) throw java.util.concurrent.CancellationException("ألغى المستخدم العملية")
+            val batchStarted = android.os.SystemClock.elapsedRealtime()
             val batchTexts = batch.map { it.text }
             var batchResults: List<String>? = null
             var batchProvider = "none"

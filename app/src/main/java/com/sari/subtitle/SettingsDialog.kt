@@ -31,6 +31,11 @@ object SettingsDialog {
         // عنوان
         root.addView(makeTitle(context, "⚙️ إعدادات الترجمة"))
 
+        root.addView(Button(context).apply {
+            text = "عرض سجل العمليات الكامل (نسخ / مسح)"
+            setOnClickListener { OperationLogStore.showHistory(context) }
+        })
+
         // مفاتيح الترجمة متاحة عند الحاجة فقط؛ لا نطلب من المستخدم اختيار المزود في كل مرة.
         root.addView(Button(context).apply {
             text = "إعداد مفاتيح الترجمة (اختياري)"
@@ -120,7 +125,7 @@ object SettingsDialog {
         }
         root.addView(providerSpinner)
         root.addView(TextView(context).apply {
-            text = "الوضع التلقائي يجرب Groq ثم Deepgram عند توفر مفاتيحهما، ثم Vosk المحلي إذا كان مثبتاً. لا يستخدم OpenAI تلقائياً لتجنب تكلفة غير مقصودة. بعد تنزيل نموذج Vosk مرة واحدة يعمل دون إنترنت ودون مفتاح API. نموذج العربية نحو 318MB والإنجليزية نحو 40MB؛ يفضّل تنزيلهما عبر Wi‑Fi."
+            text = "الوضع التلقائي يجرب Groq أولاً، ثم Deepgram إذا كان مفتاحه محفوظاً، ثم Vosk المحلي إذا كان النموذج مثبتاً. لا يستخدم OpenAI تلقائياً لتجنب تكلفة غير مقصودة. بعد تنزيل نموذج Vosk مرة واحدة يعمل دون إنترنت ودون مفتاح API. نموذج العربية نحو 318MB والإنجليزية نحو 40MB؛ يفضّل تنزيلهما عبر Wi‑Fi."
             textSize = 12f; setTextColor(Color.DKGRAY); setPadding(0, 6, 0, 6)
         })
 

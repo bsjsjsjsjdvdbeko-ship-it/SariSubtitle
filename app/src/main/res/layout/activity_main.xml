@@ -81,6 +81,37 @@
         android:visibility="gone"
         android:text="@string/status_ready" />
 
+    <!-- Stage 26: live operation status and one-tap full history -->
+    <LinearLayout
+        android:id="@+id/operationLogPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/topBar"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:background="#D91A1A1A">
+        <TextView
+            android:id="@+id/operationLogText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="سجل العمليات: جاهز"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:maxLines="2" />
+        <Button
+            android:id="@+id/operationLogButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minHeight="36dp"
+            android:textSize="10sp"
+            android:text="السجل" />
+    </LinearLayout>
+
     <!-- شريط المهام الرئيسي: بدء تلقائي، اختيار ملف ذكي، ومكتبة محفوظات -->
     <LinearLayout
         android:id="@+id/bottomBar"

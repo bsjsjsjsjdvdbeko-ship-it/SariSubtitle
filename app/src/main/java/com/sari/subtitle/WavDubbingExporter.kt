@@ -20,8 +20,25 @@ object WavDubbingExporter {
     private const val TAG = "SariDubbingExport"
     private const val MAX_OUTPUT_BYTES = 512L * 1024L * 1024L
 
-    private data class WavData(val sampleRate: Int, val channels: Int, val bitsPerSample: Int, val format: Int, val data: ByteArray) {
-        val bytesPerSecond: Long get() = sampleRate.toLong() * channels * bitsPerSample / 8
+    private data class WavData(
+        val sampleRate: Int, val channels: Int, val bitsPerSample: Int, val format: Int,
+        val data: ByteArray, val byteRate: Long, val blockAlign: Int
+    ) {
+        val bytesPerSecond: Long get() = byteRate
+    }
+
+    /** Strict validation used both before exporting and after reading the saved document back. */
+    fun validateWav(file: File): String {
+        val wav = readWav(file)
+        require(wav.format == 1 && wav.bitsPerSample == 16) { "WAV ليس PCM signed 16-bit" }
+        require(wav.sampleRate in 8_000..192_000) { "معدل العينة خارج النطاق المقبول: ${wav.sampleRate}" }
+        require(wav.channels in 1..2) { "عدد القنوات غير مدعوم: ${wav.channels}" }
+        val expectedAlign = wav.channels * (wav.bitsPerSample / 8)
+        require(wav.blockAlign == expectedAlign) { "blockAlign غير متوافق مع القنوات وعمق العينة" }
+        require(wav.byteRate == wav.sampleRate.toLong() * expectedAlign) { "byteRate غير متوافق مع تنسيق PCM" }
+        require(wav.data.isNotEmpty() && wav.data.size % expectedAlign == 0) { "حجم بيانات PCM فارغ أو غير محاذٍ لإطار صوتي" }
+        require(file.length() == 44L + wav.data.size) { "حجم الملف لا يطابق ترويسة WAV/حجم data" }
+        return "RIFF/WAVE PCM-16 صالح؛ ${wav.sampleRate} Hz، ${wav.channels} قناة، ${wav.data.size} بايت PCM"
     }
 
     fun export(tts: TextToSpeech, cues: List<SubtitleCue>, cacheDir: File, output: OutputStream,
@@ -93,10 +110,25 @@ object WavDubbingExporter {
             }
 
             val fmt = format!!
-            val dataSize = raw.length().toInt()
-            output.write(makeWavHeader(fmt.sampleRate, fmt.channels, fmt.bitsPerSample, dataSize))
-            FileInputStream(raw).use { input -> input.copyTo(output, 64 * 1024) }
-            output.flush()
+            val dataSizeLong = raw.length()
+            require(dataSizeLong > 0L && dataSizeLong <= MAX_OUTPUT_BYTES && dataSizeLong <= Int.MAX_VALUE - 36L) {
+                "حجم بيانات PCM غير صالح لملف WAV قياسي"
+            }
+            require(dataSizeLong % bytesPerFrame == 0L) { "بيانات PCM الأخيرة لا تنتهي عند حد إطار صوتي" }
+            val dataSize = dataSizeLong.toInt()
+            val completed = File(cacheDir, "sari_dub_${System.currentTimeMillis()}_validated.wav")
+            try {
+                completed.outputStream().buffered().use { stream ->
+                    stream.write(makeWavHeader(fmt.sampleRate, fmt.channels, fmt.bitsPerSample, dataSize))
+                    FileInputStream(raw).use { input -> input.copyTo(stream, 64 * 1024) }
+                }
+                val validation = validateWav(completed)
+                Log.i(TAG, "pre-save validation passed: $validation; engine=${tts.defaultEngine ?: "unknown"}; voice=${tts.voice?.name ?: "unknown"}")
+                FileInputStream(completed).use { input -> input.copyTo(output, 64 * 1024) }
+                output.flush()
+            } finally {
+                completed.delete()
+            }
         } finally {
             tts.setSpeechRate(1.0f)
             first.delete()
@@ -122,8 +154,8 @@ object WavDubbingExporter {
         })
         val result = tts.synthesizeToFile(text, android.os.Bundle(), file, id)
         check(result == TextToSpeech.SUCCESS) { "رفض محرك TTS إنشاء المقطع: $result" }
-        check(latch.await(120, TimeUnit.SECONDS)) { "انتهت مهلة توليد TTS للمقطع: ${text.take(60)}" }
-        check(status.get() == 1 && file.exists() && file.length() > 44L) { "فشل synthesizeToFile للمقطع: ${text.take(60)} (status=${status.get()})" }
+        check(latch.await(120, TimeUnit.SECONDS)) { "انتهت مهلة توليد TTS للمقطع" }
+        check(status.get() == 1 && file.exists() && file.length() > 44L) { "فشل synthesizeToFile للمقطع (status=${status.get()})" }
     }
 
     private fun readWav(file: File): WavData {
@@ -134,20 +166,24 @@ object WavDubbingExporter {
         var channels = 0
         var sampleRate = 0
         var bits = 0
+        var byteRate = 0L
+        var blockAlign = 0
         var data: ByteArray? = null
+        val declaredRiffSize = ByteBuffer.wrap(bytes, 4, 4).order(ByteOrder.LITTLE_ENDIAN).int.toLong() and 0xffffffffL
+        require(declaredRiffSize == bytes.size.toLong() - 8L) { "حجم RIFF لا يطابق طول الملف: ${file.name}" }
         while (offset + 8 <= bytes.size) {
             val id = ascii(bytes, offset, 4)
             val size = ByteBuffer.wrap(bytes, offset + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int.toLong() and 0xffffffffL
             val begin = offset + 8
-            if (size > Int.MAX_VALUE || begin.toLong() + size > bytes.size) break
+            require(size <= Int.MAX_VALUE && begin.toLong() + size <= bytes.size) { "Chunk WAV يتجاوز حدود الملف: $id في ${file.name}" }
             when (id) {
                 "fmt " -> if (size >= 16) {
                     val b = ByteBuffer.wrap(bytes, begin, size.toInt()).order(ByteOrder.LITTLE_ENDIAN)
                     format = b.short.toInt() and 0xffff
                     channels = b.short.toInt() and 0xffff
                     sampleRate = b.int
-                    b.int // byte rate
-                    b.short // block align
+                    byteRate = b.int.toLong() and 0xffffffffL
+                    blockAlign = b.short.toInt() and 0xffff
                     bits = b.short.toInt() and 0xffff
                 }
                 "data" -> data = bytes.copyOfRange(begin, begin + size.toInt())
@@ -155,7 +191,13 @@ object WavDubbingExporter {
             offset = begin + size.toInt() + (size.toInt() and 1)
         }
         require(format >= 0 && channels > 0 && sampleRate > 0 && bits > 0 && data != null) { "WAV لا يحتوي على fmt/data صالحين: ${file.name}" }
-        return WavData(sampleRate, channels, bits, format, data!!)
+        require(byteRate > 0L && blockAlign > 0) { "قيم byteRate/blockAlign مفقودة أو غير صالحة: ${file.name}" }
+        val expectedBlockAlign = channels * bits / 8
+        require(expectedBlockAlign > 0 && blockAlign == expectedBlockAlign) { "blockAlign لا يطابق تنسيق الصوت: ${file.name}" }
+        require(byteRate == sampleRate.toLong() * expectedBlockAlign) { "byteRate لا يطابق معدل العينة: ${file.name}" }
+        if (format == 1) require(data!!.size % blockAlign == 0) { "بيانات PCM غير محاذاة لإطار صوتي: ${file.name}" }
+        require(offset == bytes.size) { "تخطيط chunks WAV غير مكتمل أو يحتوي بايتات زائدة: ${file.name}" }
+        return WavData(sampleRate, channels, bits, format, data!!, byteRate, blockAlign)
     }
 
     private fun mixPcm16(raw: File, offset: Long, incoming: ByteArray, length: Int) {
