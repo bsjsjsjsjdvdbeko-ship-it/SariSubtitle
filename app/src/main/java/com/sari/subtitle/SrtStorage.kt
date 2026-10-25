@@ -29,36 +29,89 @@ class SrtStorage(private val context: Context) {
     private val indexFile: File by lazy { File(dir, "index.json") }
     private val libraryIndexFile: File by lazy { File(dir, "library-index.json") }
 
-    /** حفظ ملف SRT مستقل في مكتبة التطبيق حتى لو لم يكن مرتبطاً برابط فيديو. */
+    /**
+     * يحفظ ملف SRT في المكتبة مع upsert حسب هوية الفيديو.
+     * عند وجود سجل سابق لنفس منشور X (Status ID) أو لنفس مصدر الفيديو، يتم تحديثه
+     * وإزالة السجلات المكررة بدلاً من إنشاء سجل جديد.
+     */
     fun saveLibraryItem(title: String, srtText: String, cueCount: Int, sourceUrl: String? = null): String? {
         if (srtText.isBlank()) return null
         var createdFile: File? = null
+        var tempFile: File? = null
         return try {
-            val id = UUID.randomUUID().toString()
-            val fileName = "library_$id.srt"
-            val outputFile = File(dir, fileName)
-            createdFile = outputFile
-            outputFile.writeText(srtText, Charsets.UTF_8)
-            if (!outputFile.isFile || outputFile.length() <= 0L) {
-                outputFile.delete()
-                return null
+            val safeSource = sourceUrl?.trim()?.takeIf {
+                (it.startsWith("https://", true) || it.startsWith("http://", true) ||
+                    it.startsWith("content://", true) || it.startsWith("file://", true)) &&
+                    !it.startsWith("local-media://", true)
             }
             val index = readLibraryIndex()
+            val matchingIds = mutableListOf<String>()
+            if (!safeSource.isNullOrBlank()) {
+                val incomingCanonical = VideoUrlIdentity.canonicalKey(safeSource)
+                val incomingNormalized = VideoUrlIdentity.normalize(safeSource)
+                val keys = index.keys()
+                while (keys.hasNext()) {
+                    val existingId = keys.next()
+                    val entry = index.optJSONObject(existingId) ?: continue
+                    val existingSource = entry.optString("sourceUrl").takeIf { it.isNotBlank() } ?: continue
+                    if (existingSource.startsWith("local-media://", true)) continue
+                    val existingCanonical = VideoUrlIdentity.canonicalKey(existingSource)
+                    val existingNormalized = VideoUrlIdentity.normalize(existingSource)
+                    val same = if (incomingCanonical.isNotBlank()) {
+                        incomingCanonical == existingCanonical
+                    } else {
+                        existingCanonical.isBlank() && incomingNormalized.isNotBlank() && incomingNormalized == existingNormalized
+                    }
+                    if (same) matchingIds += existingId
+                }
+            }
+
+            // Reuse an existing item ID so the library entry is replaced in place.
+            val id = matchingIds.firstOrNull() ?: UUID.randomUUID().toString()
+            val fileName = "library_${UUID.randomUUID()}.srt"
+            val outputFile = File(dir, fileName)
+            createdFile = outputFile
+            tempFile = File(dir, "$fileName.tmp")
+            tempFile!!.writeText(srtText, Charsets.UTF_8)
+            if (!tempFile!!.isFile || tempFile!!.length() <= 0L) return null
+            if (!tempFile!!.renameTo(outputFile)) {
+                tempFile!!.copyTo(outputFile, overwrite = false)
+                tempFile!!.delete()
+            }
+            if (!outputFile.isFile || outputFile.length() <= 0L) return null
+
+            val oldFiles = mutableListOf<String>()
+            matchingIds.forEach { matchedId ->
+                index.optJSONObject(matchedId)?.optString("fileName")?.takeIf { it.isNotBlank() && it != fileName }?.let(oldFiles::add)
+                if (matchedId != id) index.remove(matchedId)
+            }
             index.put(id, JSONObject().apply {
                 put("title", title.ifBlank { "ترجمة محفوظة.srt" })
                 put("fileName", fileName)
                 put("cueCount", cueCount)
                 put("savedAt", System.currentTimeMillis())
-                val safeSource = sourceUrl?.trim()?.takeIf { it.startsWith("https://", true) || it.startsWith("http://", true) || it.startsWith("content://", true) || it.startsWith("file://", true) }
                 if (safeSource != null) put("sourceUrl", safeSource)
+                else {
+                    // Keep a previous valid source if this update did not supply one.
+                    val previousSource = readLibraryIndex().optJSONObject(id)?.optString("sourceUrl")
+                    if (!previousSource.isNullOrBlank() && !previousSource.startsWith("local-media://", true)) put("sourceUrl", previousSource)
+                }
             })
-            if (writeLibraryIndex(index)) id else {
+            if (!writeLibraryIndex(index)) {
                 outputFile.delete()
-                null
+                createdFile = null
+                return null
             }
+
+            // Delete previous payloads only after the new index has been committed.
+            oldFiles.distinct().forEach { oldName -> if (oldName != fileName) safeSrtFile(oldName)?.delete() }
+            createdFile = null
+            id
         } catch (_: Exception) {
-            createdFile?.delete()
             null
+        } finally {
+            tempFile?.delete()
+            createdFile?.delete()
         }
     }
 
