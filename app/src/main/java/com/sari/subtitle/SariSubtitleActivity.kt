@@ -1627,6 +1627,9 @@ class SariSubtitleActivity : AppCompatActivity() {
             Toast.makeText(this, "أضف مفتاح Groq أو ثبّت نموذج Vosk المحلي من الإعدادات أولاً", Toast.LENGTH_LONG).show()
             return
         }
+        // Capture source identity before background transcription so navigation during processing cannot rebind the SRT.
+        val sourceForTranscription = resolvePickedMediaSource(uri)
+        val sourceDisplayName = queryDisplayName(uri)?.takeIf { it.isNotBlank() }
         val cancellation = OperationCancellation()
         beginTrackedOperation(cancellation)
         val progress = ProgressDialog(this).apply {
@@ -1678,7 +1681,8 @@ class SariSubtitleActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (isFinishing || cancellation.isCancelled()) { progress.dismiss(); Toast.makeText(this, "تم إلغاء العملية", Toast.LENGTH_SHORT).show(); return@runOnUiThread }
                     progress.setMessage("اكتمل التفريغ — جارٍ ترجمة SRT إلى العربية…")
-                    translateAndShowSrtAutomatically("local-media://${uri.lastPathSegment ?: System.currentTimeMillis()}", rawSrt, "downloaded-media-${System.currentTimeMillis()}.srt")
+                    val sourceName = sourceDisplayName ?: "downloaded-media-${System.currentTimeMillis()}.srt"
+                    translateAndShowSrtAutomatically(sourceForTranscription, rawSrt, sourceName)
                     progress.dismiss()
                 }
             } catch (e: Exception) {
@@ -2075,7 +2079,13 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
             rows += LibraryRow("📄 ${item.title}  •  ${item.cueCount} مقطع$source", url = item.sourceUrl, item = item)
         }
         storage.listUrls().distinct().sorted().forEach { url ->
-            if (rows.none { it.url != null && sameVideoUrl(it.url, url) }) rows += LibraryRow("🎬 ${displaySourceLabel(url)}\n$url", url = url)
+            // Never present obsolete synthetic local-media:// identifiers as real video links.
+            if (url.startsWith("local-media://", true)) return@forEach
+            if (rows.none { it.url != null && sameVideoUrl(it.url, url) }) {
+                val label = displaySourceLabel(url)
+                val description = if (url.startsWith("http://", true) || url.startsWith("https://", true)) "$label\n$url" else label
+                rows += LibraryRow("🎬 $description", url = url)
+            }
         }
         if (rows.isEmpty()) {
             androidx.appcompat.app.AlertDialog.Builder(this)
@@ -2114,6 +2124,20 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                                 pollCurrentTimeOnce()
                                 Toast.makeText(this, "تم تحميل الترجمة؛ لا يوجد رابط فيديو محفوظ معها", Toast.LENGTH_LONG).show()
                             }
+                            source.startsWith("local-media://", true) -> {
+                                // Legacy records contain no recoverable original URI. Repair only when the current page is an X post.
+                                val currentX = webView.url.orEmpty().takeIf { isXStatusUrl(it) }
+                                if (currentX != null) {
+                                    storage.updateLibraryItemSource(row.item.id, currentX)
+                                    saveCachedSrt(currentX, srt, cues.size)
+                                    lastSrtUrl = currentX
+                                    urlInput.setText(currentX)
+                                    webView.loadUrl(currentX)
+                                    showStatus("تم تصحيح ربط الترجمة برابط X الحالي واستعادتها.")
+                                } else {
+                                    Toast.makeText(this, "هذه ترجمة قديمة لا تحتوي على رابط الفيديو الأصلي. افتح منشور X الأصلي ثم أعد فتحها لربطها، أو أعد إنشاء الترجمة من الملف المحلي.", Toast.LENGTH_LONG).show()
+                                }
+                            }
                             source.startsWith("http://", true) || source.startsWith("https://", true) -> {
                                 lastSrtUrl = source
                                 // Ensure the library SRT is also available to Smart SRT Reuse.
@@ -2144,12 +2168,28 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                 }
             } else {
                 val url = row.url.orEmpty()
-                urlInput.setText(url)
-                try { webView.loadUrl(url) } catch (_: Exception) { showStatus("تعذّر فتح رابط الفيديو.") }
-                if (restoreCachedSrt(url)) {
-                    Toast.makeText(this, "تم تحميل الترجمة المحفوظة دون إعادة المعالجة", Toast.LENGTH_LONG).show()
-                    showStatus("تم استرجاع ${repo.size} مقطع محفوظ لهذا الفيديو؛ لم يتم استدعاء مزود ترجمة.")
-                } else Toast.makeText(this, "الرابط محفوظ لكن ملف SRT غير متاح", Toast.LENGTH_LONG).show()
+                if (url.startsWith("local-media://", true)) {
+                    Toast.makeText(this, "مصدر محلي قديم غير قابل للاستعادة؛ اختر الملف الأصلي مجددًا.", Toast.LENGTH_LONG).show()
+                } else {
+                    val srt = storage.load(url)
+                    if (restoreCachedSrt(url)) {
+                        if (url.startsWith("http://", true) || url.startsWith("https://", true)) {
+                            urlInput.setText(url)
+                            try { webView.loadUrl(url) } catch (_: Exception) { showStatus("تعذّر فتح رابط الفيديو.") }
+                        } else if (url.startsWith("content://", true) || url.startsWith("file://", true)) {
+                            try {
+                                startActivity(Intent(this, LocalMediaPlayerActivity::class.java).apply {
+                                    data = Uri.parse(url)
+                                    putExtra(LocalMediaPlayerActivity.EXTRA_SRT, srt.orEmpty())
+                                    putExtra(LocalMediaPlayerActivity.EXTRA_TITLE, displaySourceLabel(url))
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                })
+                            } catch (_: Exception) { Toast.makeText(this, "تعذّر فتح الفيديو المحلي", Toast.LENGTH_LONG).show() }
+                        }
+                        Toast.makeText(this, "تم تحميل الترجمة المحفوظة دون إعادة المعالجة", Toast.LENGTH_LONG).show()
+                        showStatus("تم استرجاع ${repo.size} مقطع محفوظ لهذا المصدر؛ لم يتم استدعاء مزود ترجمة.")
+                    } else Toast.makeText(this, "المصدر محفوظ لكن ملف SRT غير متاح", Toast.LENGTH_LONG).show()
+                }
             }
             dialog.dismiss()
             } catch (e: Exception) {
@@ -2185,7 +2225,11 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                 uri.host.orEmpty().contains("youtube", true) || uri.host.orEmpty() == "youtu.be" -> "YouTube · ${uri.getQueryParameter("v") ?: uri.lastPathSegment.orEmpty()}"
                 else -> uri.host ?: "رابط فيديو"
             }
-            source.startsWith("content://", true) || source.startsWith("file://", true) -> "فيديو محلي"
+            source.startsWith("content://", true) || source.startsWith("file://", true) -> {
+                val name = if (source.startsWith("content://", true)) queryDisplayName(uri) else uri.lastPathSegment?.let { Uri.decode(it) }
+                name?.takeIf { it.isNotBlank() }?.let { "فيديو محلي · $it" } ?: "فيديو محلي"
+            }
+            source.startsWith("local-media://", true) -> "مصدر محلي قديم — الرابط الأصلي غير محفوظ"
             else -> "مصدر فيديو"
         }
     } catch (_: Exception) { "مصدر فيديو" }
@@ -2212,6 +2256,20 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
     }
 
     private fun currentVideoUrlForCache(): String? = webView.url?.trim()?.takeIf { isVideoLikeUrl(it) }
+
+    /** Use the current X post URL when the selected-media transcription was launched from an X post;
+     * otherwise keep the original local content/file URI. Never create synthetic local-media:// IDs. */
+    private fun resolvePickedMediaSource(uri: Uri): String {
+        val currentPage = webView.url.orEmpty().trim()
+        return if (isXStatusUrl(currentPage)) currentPage else uri.toString()
+    }
+
+    private fun isXStatusUrl(raw: String): Boolean = try {
+        val uri = Uri.parse(raw.trim())
+        val host = uri.host.orEmpty().lowercase(Locale.ROOT).removePrefix("www.")
+        (host == "x.com" || host.endsWith(".x.com") || host == "twitter.com" || host.endsWith(".twitter.com")) &&
+            Regex("(?:^|/)status/(\\d+)(?:/|$)").containsMatchIn(uri.path.orEmpty())
+    } catch (_: Exception) { false }
 
     private fun showBottomSheet() {
         val sheet = BottomSheetDialog(this)
@@ -2581,6 +2639,17 @@ private fun openAudioPicker() {
             return
         }
         val uri = data?.data ?: return
+        if (requestCode == REQ_PICK_VIDEO_FOR_AUTO) {
+            // Keep the document-provider permission so My Files can reopen this local video later.
+            try {
+                val grantedFlags = data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                if ((data.flags and Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) != 0) {
+                    contentResolver.takePersistableUriPermission(uri, grantedFlags and Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("SariMyFiles", "Provider did not allow persistable URI permission for $uri", e)
+            }
+        }
         when (requestCode) {
             REQ_PICK_SRT -> processSmartSrt(uri)
             REQ_PICK_SRT_TO_TRANSLATE -> processTranslateSrt(uri)
@@ -2700,6 +2769,10 @@ private fun openAudioPicker() {
 
     /** Save the SRT and remember its URL only after the storage index confirms success. */
     private fun saveCachedSrt(url: String, srtText: String, cueCount: Int): Boolean {
+        if (url.trim().startsWith("local-media://", true)) {
+            android.util.Log.w("SariSrtStorage", "Refusing synthetic local-media cache key; original source URI/URL is required")
+            return false
+        }
         val saved = storage.save(url, srtText, cueCount) != null
         if (saved) getPreferences(MODE_PRIVATE).edit().putString(PREF_LAST_CACHED_VIDEO_URL, url).apply()
         return saved

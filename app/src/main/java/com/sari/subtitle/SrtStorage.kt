@@ -87,6 +87,19 @@ class SrtStorage(private val context: Context) {
         } catch (_: Exception) { null }
     }
 
+    /** Repair source metadata for legacy library entries without rewriting the SRT payload. */
+    fun updateLibraryItemSource(id: String, sourceUrl: String): Boolean {
+        val clean = sourceUrl.trim()
+        if (!(clean.startsWith("https://", true) || clean.startsWith("http://", true) ||
+                clean.startsWith("content://", true) || clean.startsWith("file://", true))) return false
+        return try {
+            val index = readLibraryIndex()
+            val entry = index.optJSONObject(id) ?: return false
+            entry.put("sourceUrl", clean)
+            writeLibraryIndex(index)
+        } catch (_: Exception) { false }
+    }
+
     fun deleteLibraryItem(id: String): Boolean {
         return try {
             val index = readLibraryIndex()
@@ -105,7 +118,7 @@ class SrtStorage(private val context: Context) {
         var tempFile: File? = null
         return try {
             val normalizedUrl = normalizeUrl(url)
-            if (normalizedUrl.isBlank() || srtText.isBlank()) return null
+            if (normalizedUrl.isBlank() || srtText.isBlank() || url.trim().startsWith("local-media://", true)) return null
 
             // Read the existing index before writing any new data. A damaged index must not
             // silently become an empty index and erase the user's previous cache entries.
