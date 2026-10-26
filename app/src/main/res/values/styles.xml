@@ -1,0 +1,1 @@
+<resources><style name="Theme.SariSubtitle.Legacy" parent="Theme.Material3.Dark.NoActionBar"><item name="colorPrimary">@color/primary</item><item name="colorSecondary">@color/accent</item></style></resources>

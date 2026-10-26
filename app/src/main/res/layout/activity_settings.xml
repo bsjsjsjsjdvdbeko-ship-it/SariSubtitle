@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+ android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical"
+ android:background="@color/background" android:layoutDirection="locale">
+ <com.google.android.material.appbar.MaterialToolbar android:id="@+id/settingsToolbar" android:layout_width="match_parent" android:layout_height="wrap_content"
+  android:background="@color/background" app:title="@string/settings_title" app:titleTextColor="@color/text_primary" app:navigationIcon="@drawable/ic_arrow_back"/>
+ <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true">
+  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="18dp">
+   <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="أقسام الإعدادات" android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold" android:paddingBottom="4dp"/>
+   <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="اختر القسم الذي تريد ضبطه. تُحفظ الإعدادات في التخزين المشفر الحالي." android:textColor="@color/text_secondary" android:textSize="14sp" android:paddingBottom="12dp"/>
+   <com.google.android.material.card.MaterialCardView android:id="@+id/card_keys" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:clickable="true" android:focusable="true" android:foreground="?attr/selectableItemBackground" app:cardCornerRadius="16dp" app:cardBackgroundColor="@color/surface" app:strokeColor="@color/outline" app:strokeWidth="1dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:padding="15dp" android:orientation="horizontal">
+     <ImageView android:layout_width="34dp" android:layout_height="34dp" android:padding="4dp" android:src="@drawable/ic_key" android:contentDescription="@null"/>
+     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="12dp" android:orientation="vertical">
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="مفاتيح API" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="أدخل مفاتيح مزوّدي الترجمة" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+     </LinearLayout>
+     <ImageView android:layout_width="20dp" android:layout_height="20dp" android:rotation="180" android:src="@drawable/ic_arrow_back" android:contentDescription="@null"/>
+    </LinearLayout>
+   </com.google.android.material.card.MaterialCardView>
+   <com.google.android.material.card.MaterialCardView android:id="@+id/card_stt" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:clickable="true" android:focusable="true" android:foreground="?attr/selectableItemBackground" app:cardCornerRadius="16dp" app:cardBackgroundColor="@color/surface" app:strokeColor="@color/outline" app:strokeWidth="1dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:padding="15dp" android:orientation="horizontal">
+     <ImageView android:layout_width="34dp" android:layout_height="34dp" android:padding="4dp" android:src="@drawable/ic_mic" android:contentDescription="@null"/>
+     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="12dp" android:orientation="vertical">
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="التعرّف على الكلام" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="Groq Whisper وDeepgram وVosk" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+     </LinearLayout>
+     <ImageView android:layout_width="20dp" android:layout_height="20dp" android:rotation="180" android:src="@drawable/ic_arrow_back" android:contentDescription="@null"/>
+    </LinearLayout>
+   </com.google.android.material.card.MaterialCardView>
+   <com.google.android.material.card.MaterialCardView android:id="@+id/card_languages" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:clickable="true" android:focusable="true" android:foreground="?attr/selectableItemBackground" app:cardCornerRadius="16dp" app:cardBackgroundColor="@color/surface" app:strokeColor="@color/outline" app:strokeWidth="1dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:padding="15dp" android:orientation="horizontal">
+     <ImageView android:layout_width="34dp" android:layout_height="34dp" android:padding="4dp" android:src="@drawable/ic_translate" android:contentDescription="@null"/>
+     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="12dp" android:orientation="vertical">
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="اللغات" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="لغة الصوت والنص والترجمة" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+     </LinearLayout>
+     <ImageView android:layout_width="20dp" android:layout_height="20dp" android:rotation="180" android:src="@drawable/ic_arrow_back" android:contentDescription="@null"/>
+    </LinearLayout>
+   </com.google.android.material.card.MaterialCardView>
+   <com.google.android.material.card.MaterialCardView android:id="@+id/card_appearance" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:clickable="true" android:focusable="true" android:foreground="?attr/selectableItemBackground" app:cardCornerRadius="16dp" app:cardBackgroundColor="@color/surface" app:strokeColor="@color/outline" app:strokeWidth="1dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:padding="15dp" android:orientation="horizontal">
+     <ImageView android:layout_width="34dp" android:layout_height="34dp" android:padding="4dp" android:src="@drawable/ic_palette" android:contentDescription="@null"/>
+     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="12dp" android:orientation="vertical">
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="المظهر" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="حجم الخط والشفافية والموضع" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+     </LinearLayout>
+     <ImageView android:layout_width="20dp" android:layout_height="20dp" android:rotation="180" android:src="@drawable/ic_arrow_back" android:contentDescription="@null"/>
+    </LinearLayout>
+   </com.google.android.material.card.MaterialCardView>
+   <com.google.android.material.card.MaterialCardView android:id="@+id/card_quality" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:clickable="true" android:focusable="true" android:foreground="?attr/selectableItemBackground" app:cardCornerRadius="16dp" app:cardBackgroundColor="@color/surface" app:strokeColor="@color/outline" app:strokeWidth="1dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:padding="15dp" android:orientation="horizontal">
+     <ImageView android:layout_width="34dp" android:layout_height="34dp" android:padding="4dp" android:src="@drawable/ic_check" android:contentDescription="@null"/>
+     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="12dp" android:orientation="vertical">
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="جودة الترجمة" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="Fast وBalanced وHuman Quality" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+     </LinearLayout>
+     <ImageView android:layout_width="20dp" android:layout_height="20dp" android:rotation="180" android:src="@drawable/ic_arrow_back" android:contentDescription="@null"/>
+    </LinearLayout>
+   </com.google.android.material.card.MaterialCardView>
+   <com.google.android.material.card.MaterialCardView android:id="@+id/card_context" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:clickable="true" android:focusable="true" android:foreground="?attr/selectableItemBackground" app:cardCornerRadius="16dp" app:cardBackgroundColor="@color/surface" app:strokeColor="@color/outline" app:strokeWidth="1dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:padding="15dp" android:orientation="horizontal">
+     <ImageView android:layout_width="34dp" android:layout_height="34dp" android:padding="4dp" android:src="@drawable/ic_info" android:contentDescription="@null"/>
+     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="12dp" android:orientation="vertical">
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="الترجمة السياقية" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="السياق والقاموس وذاكرة الترجمة" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+     </LinearLayout>
+     <ImageView android:layout_width="20dp" android:layout_height="20dp" android:rotation="180" android:src="@drawable/ic_arrow_back" android:contentDescription="@null"/>
+    </LinearLayout>
+   </com.google.android.material.card.MaterialCardView>
+   <com.google.android.material.card.MaterialCardView android:id="@+id/card_omniroute" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:clickable="true" android:focusable="true" android:foreground="?attr/selectableItemBackground" app:cardCornerRadius="16dp" app:cardBackgroundColor="@color/surface" app:strokeColor="@color/outline" app:strokeWidth="1dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:padding="15dp" android:orientation="horizontal">
+     <ImageView android:layout_width="34dp" android:layout_height="34dp" android:padding="4dp" android:src="@drawable/ic_settings" android:contentDescription="@null"/>
+     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="12dp" android:orientation="vertical">
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="OmniRoute" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="البوابة والنماذج واختبار الاتصال" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+     </LinearLayout>
+     <ImageView android:layout_width="20dp" android:layout_height="20dp" android:rotation="180" android:src="@drawable/ic_arrow_back" android:contentDescription="@null"/>
+    </LinearLayout>
+   </com.google.android.material.card.MaterialCardView>
+   <com.google.android.material.card.MaterialCardView android:id="@+id/card_orchestration" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:clickable="true" android:focusable="true" android:foreground="?attr/selectableItemBackground" app:cardCornerRadius="16dp" app:cardBackgroundColor="@color/surface" app:strokeColor="@color/outline" app:strokeWidth="1dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:padding="15dp" android:orientation="horizontal">
+     <ImageView android:layout_width="34dp" android:layout_height="34dp" android:padding="4dp" android:src="@drawable/ic_settings" android:contentDescription="@null"/>
+     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="12dp" android:orientation="vertical">
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="AI Orchestration" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="التوجيه الذكي والمقاييس ولوحة المزود" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+     </LinearLayout>
+     <ImageView android:layout_width="20dp" android:layout_height="20dp" android:rotation="180" android:src="@drawable/ic_arrow_back" android:contentDescription="@null"/>
+    </LinearLayout>
+   </com.google.android.material.card.MaterialCardView>
+   <com.google.android.material.card.MaterialCardView android:id="@+id/card_history" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:clickable="true" android:focusable="true" android:foreground="?attr/selectableItemBackground" app:cardCornerRadius="16dp" app:cardBackgroundColor="@color/surface" app:strokeColor="@color/outline" app:strokeWidth="1dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:padding="15dp" android:orientation="horizontal">
+     <ImageView android:layout_width="34dp" android:layout_height="34dp" android:padding="4dp" android:src="@drawable/ic_history" android:contentDescription="@null"/>
+     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="12dp" android:orientation="vertical">
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="سجل الترجمات" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="عرض وتصدير آخر 50 ترجمة" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+     </LinearLayout>
+     <ImageView android:layout_width="20dp" android:layout_height="20dp" android:rotation="180" android:src="@drawable/ic_arrow_back" android:contentDescription="@null"/>
+    </LinearLayout>
+   </com.google.android.material.card.MaterialCardView>
+   <com.google.android.material.card.MaterialCardView android:id="@+id/card_about" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:clickable="true" android:focusable="true" android:foreground="?attr/selectableItemBackground" app:cardCornerRadius="16dp" app:cardBackgroundColor="@color/surface" app:strokeColor="@color/outline" app:strokeWidth="1dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:padding="15dp" android:orientation="horizontal">
+     <ImageView android:layout_width="34dp" android:layout_height="34dp" android:padding="4dp" android:src="@drawable/ic_info" android:contentDescription="@null"/>
+     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="12dp" android:orientation="vertical">
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="حول التطبيق" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="الإصدار ومعلومات التطبيق" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+     </LinearLayout>
+     <ImageView android:layout_width="20dp" android:layout_height="20dp" android:rotation="180" android:src="@drawable/ic_arrow_back" android:contentDescription="@null"/>
+    </LinearLayout>
+   </com.google.android.material.card.MaterialCardView>
+  </LinearLayout>
+ </ScrollView>
+</LinearLayout>

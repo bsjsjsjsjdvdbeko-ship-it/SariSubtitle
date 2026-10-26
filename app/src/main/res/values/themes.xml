@@ -1,0 +1,12 @@
+<resources>
+    <style name="Theme.SariSubtitle" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/primary</item><item name="colorOnPrimary">@color/text_primary</item>
+        <item name="colorSecondary">@color/accent</item><item name="colorOnSecondary">@color/background</item>
+        <item name="colorSurface">@color/surface</item><item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorSurfaceVariant">@color/surface_variant</item><item name="colorError">@color/error</item>
+        <item name="android:colorBackground">@color/background</item><item name="android:statusBarColor">@color/background</item>
+        <item name="android:navigationBarColor">@color/background</item><item name="android:windowLightStatusBar">false</item>
+        <item name="android:fontFamily">sans</item><item name="materialCardViewStyle">@style/Widget.Sari.Card</item>
+    </style>
+    <style name="Widget.Sari.Card" parent="Widget.Material3.CardView.Filled"><item name="cardCornerRadius">20dp</item><item name="cardElevation">2dp</item><item name="cardBackgroundColor">@color/surface</item><item name="strokeColor">@color/outline</item><item name="strokeWidth">1dp</item></style>
+</resources>

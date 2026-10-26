@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@color/background" android:layoutDirection="locale">
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/sttToolbar" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:background="@color/background" app:title="@string/stt_provider_title"
+        app:titleTextColor="@color/text_primary" app:navigationIcon="@drawable/ic_arrow_back"/>
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:padding="20dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="اختر محرك تحويل الكلام إلى نص. مفاتيح API تُحفظ في التخزين المشفر للتطبيق."
+                android:textColor="@color/text_secondary" android:textSize="14sp" android:layout_marginBottom="16dp"/>
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:hint="@string/stt_provider" app:boxBackgroundMode="outline" app:endIconMode="dropdown_menu">
+                <com.google.android.material.textfield.MaterialAutoCompleteTextView
+                    android:id="@+id/sttProviderSpinner" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:inputType="none"/>
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp"
+                android:hint="@string/deepgram_key" app:boxBackgroundMode="outline" app:endIconMode="password_toggle">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/deepgramKeyInput" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:inputType="textPassword" android:singleLine="true"/>
+            </com.google.android.material.textfield.TextInputLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <com.google.android.material.button.MaterialButton android:id="@+id/testDeepgramButton"
+                    android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:text="@string/test_deepgram"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/getDeepgramKeyButton"
+                    style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:text="@string/get_deepgram_key"/>
+            </LinearLayout>
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp"
+                android:hint="@string/openai_key" app:boxBackgroundMode="outline" app:endIconMode="password_toggle">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/openAiKeyInput" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:inputType="textPassword" android:singleLine="true"/>
+            </com.google.android.material.textfield.TextInputLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <com.google.android.material.button.MaterialButton android:id="@+id/testOpenAiButton"
+                    android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:text="@string/test_openai"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/getOpenAiKeyButton"
+                    style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:text="@string/get_openai_key"/>
+            </LinearLayout>
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp"
+                app:cardBackgroundColor="@color/surface" app:strokeColor="@color/outline" app:strokeWidth="1dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:text="Vosk Offline" android:textColor="@color/text_primary" android:textStyle="bold" android:textSize="18sp"/>
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp"
+                        android:text="يتطلب تنزيل نموذج عربي كبير. تأكد من توفر مساحة تخزين واتصال Wi‑Fi قبل البدء."
+                        android:textColor="@color/text_secondary" android:textSize="13sp"/>
+                    <TextView android:id="@+id/voskModelStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:textColor="@color/text_secondary" android:textSize="13sp" android:text="جارٍ التحقق من وجود نموذج Vosk…" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/downloadVoskButton"
+                        android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
+                        android:text="@string/download_vosk" app:icon="@drawable/ic_mic"/>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+            <com.google.android.material.button.MaterialButton android:id="@+id/saveSttSettingsButton"
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="22dp"
+                android:text="@string/save_settings"/>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

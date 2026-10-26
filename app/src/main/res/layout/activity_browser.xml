@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+ android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="@color/background" android:layoutDirection="locale">
+ <com.google.android.material.appbar.MaterialToolbar android:layout_width="match_parent" android:layout_height="wrap_content" app:title="@string/browser_title" app:titleTextColor="@color/text_primary" app:navigationIcon="@drawable/ic_arrow_back" android:id="@+id/browserToolbar"/>
+ <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="8dp" android:gravity="center_vertical">
+  <com.google.android.material.button.MaterialButton android:id="@+id/browserBackButton" style="@style/Widget.Material3.Button.IconButton" android:layout_width="48dp" android:layout_height="48dp" android:text="‹"/>
+  <com.google.android.material.button.MaterialButton android:id="@+id/browserForwardButton" style="@style/Widget.Material3.Button.IconButton" android:layout_width="48dp" android:layout_height="48dp" android:text="›"/>
+  <com.google.android.material.button.MaterialButton android:id="@+id/browserRefreshButton" style="@style/Widget.Material3.Button.IconButton" android:layout_width="48dp" android:layout_height="48dp" android:text="↻"/>
+  <com.google.android.material.textfield.TextInputLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" app:boxBackgroundMode="outline">
+   <com.google.android.material.textfield.TextInputEditText android:id="@+id/browserUrlInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:singleLine="true" android:inputType="textUri"/>
+  </com.google.android.material.textfield.TextInputLayout>
+  <com.google.android.material.button.MaterialButton android:id="@+id/browserOpenButton" style="@style/Widget.Material3.Button.IconButton" android:layout_width="48dp" android:layout_height="48dp" android:text="↵"/>
+ </LinearLayout>
+ <ProgressBar android:id="@+id/browserProgress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="3dp" android:max="100"/>
+ <WebView android:id="@+id/browserWebView" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"/>
+ <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="6dp" android:gravity="center_vertical">
+  <TextView android:id="@+id/browserStatus" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:textColor="@color/text_secondary" android:text="@string/browser_ready"/>
+  <com.google.android.material.button.MaterialButton android:id="@+id/browserExternalButton" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/open_external"/>
+ </LinearLayout>
+</LinearLayout>

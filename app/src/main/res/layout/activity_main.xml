@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/background" android:layoutDirection="locale">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
+        <com.google.android.material.appbar.MaterialToolbar android:id="@+id/mainToolbar" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@color/background" app:title="Sari Subtitle" app:titleTextColor="@color/text_primary" app:logo="@drawable/ic_translate" app:contentInsetStartWithNavigation="16dp"/>
+        <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingStart="20dp" android:paddingEnd="20dp" android:paddingTop="10dp" android:paddingBottom="28dp">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/home_hero_title" android:textColor="@color/text_primary" android:textSize="30sp" android:textStyle="bold"/>
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="@string/home_easy_description" android:textColor="@color/text_secondary" android:textSize="15sp"/>
+
+                <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp" app:cardCornerRadius="24dp" app:cardBackgroundColor="@color/surface" app:strokeColor="@color/outline" app:strokeWidth="1dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp">
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                            <View android:id="@+id/statusDot" android:layout_width="10dp" android:layout_height="10dp" android:background="@drawable/status_dot"/>
+                            <TextView android:id="@+id/captureStatus" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="10dp" android:text="@string/capture_stopped" android:textColor="@color/text_primary" android:textSize="15sp" android:textStyle="bold"/>
+                            <TextView android:id="@+id/engineStatus" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/engine_automatic" android:textColor="@color/accent" android:textSize="12sp"/>
+                        </LinearLayout>
+                        <TextView android:id="@+id/latestTranslation" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp" android:text="@string/no_translation_yet" android:textColor="@color/text_primary" android:textSize="18sp" android:lineSpacingExtra="5dp" android:minHeight="70dp"/>
+                        <com.google.android.material.button.MaterialButton android:id="@+id/primaryActionButton" style="@style/Widget.Material3.Button" android:layout_width="match_parent" android:layout_height="60dp" android:layout_marginTop="16dp" android:text="@string/start_translation" android:textSize="16sp" android:textStyle="bold" app:icon="@drawable/ic_play" app:iconGravity="textStart" app:cornerRadius="18dp"/>
+                        <TextView android:id="@+id/permissionHint" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="@string/first_start_hint" android:textColor="@color/text_secondary" android:textSize="12sp" android:gravity="center"/>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" app:cardCornerRadius="20dp" app:cardBackgroundColor="@color/surface" app:strokeColor="@color/outline" app:strokeWidth="1dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/translation_profile" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:gravity="center_vertical">
+                            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/source_language" android:textColor="@color/text_secondary"/>
+                            <TextView android:id="@+id/sourceLanguageSummary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Auto Detect" android:textColor="@color/text_primary" android:textStyle="bold"/>
+                        </LinearLayout>
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:gravity="center_vertical">
+                            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/target_language" android:textColor="@color/text_secondary"/>
+                            <TextView android:id="@+id/targetLanguageSummary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="العربية" android:textColor="@color/text_primary" android:textStyle="bold"/>
+                        </LinearLayout>
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:gravity="center_vertical">
+                            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/translation_quality_title" android:textColor="@color/text_secondary"/>
+                            <TextView android:id="@+id/qualitySummary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="تلقائي" android:textColor="@color/text_primary" android:textStyle="bold"/>
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" app:cardCornerRadius="20dp" app:cardBackgroundColor="@color/surface" app:strokeColor="@color/outline" app:strokeWidth="1dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal" android:padding="16dp">
+                        <ImageView android:layout_width="42dp" android:layout_height="42dp" android:padding="9dp" android:background="@drawable/icon_tile" android:src="@drawable/ic_translate" android:contentDescription="@string/overlay_card_title"/>
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:layout_marginStart="12dp">
+                            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/overlay_card_title" android:textColor="@color/text_primary" android:textStyle="bold" android:textSize="16sp"/>
+                            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="@string/overlay_auto_description" android:textColor="@color/text_secondary" android:textSize="12sp"/>
+                        </LinearLayout>
+                        <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/overlaySwitch" android:layout_width="wrap_content" android:layout_height="wrap_content" android:contentDescription="@string/overlay_card_title"/>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" app:cardCornerRadius="20dp" app:cardBackgroundColor="@color/surface" app:strokeColor="@color/outline" app:strokeWidth="1dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/video_source_title" android:textColor="@color/text_primary" android:textSize="16sp" android:textStyle="bold"/>
+                        <com.google.android.material.textfield.TextInputLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" app:boxBackgroundMode="outline">
+                            <com.google.android.material.textfield.TextInputEditText android:id="@+id/homeUrlInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:singleLine="true" android:inputType="textUri" android:hint="https://..." />
+                        </com.google.android.material.textfield.TextInputLayout>
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
+                            <com.google.android.material.button.MaterialButton android:id="@+id/pasteUrlButton" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="@string/paste_url"/>
+                            <Space android:layout_width="8dp" android:layout_height="1dp"/>
+                            <com.google.android.material.button.MaterialButton android:id="@+id/openBrowserButton" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:text="@string/open_browser"/>
+                        </LinearLayout>
+                        <com.google.android.material.button.MaterialButton android:id="@+id/openVideoPlayerButton" style="@style/Widget.Material3.Button.TextButton" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="4dp" android:text="@string/open_video_player" app:icon="@drawable/ic_play" app:iconGravity="textStart"/>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:orientation="horizontal">
+                    <com.google.android.material.button.MaterialButton android:id="@+id/historyShortcut" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_height="50dp" android:layout_weight="1" android:text="@string/history" app:icon="@drawable/ic_history" app:iconGravity="textStart"/>
+                    <Space android:layout_width="10dp" android:layout_height="1dp"/>
+                    <com.google.android.material.button.MaterialButton android:id="@+id/settingsShortcut" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_height="50dp" android:layout_weight="1" android:text="@string/settings" app:icon="@drawable/ic_settings" app:iconGravity="textStart"/>
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
+        <com.google.android.material.bottomnavigation.BottomNavigationView android:id="@+id/bottomNavigation" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@color/surface" app:itemIconTint="@color/primary" app:itemTextColor="@color/text_secondary" app:labelVisibilityMode="labeled" app:menu="@menu/bottom_nav_menu"/>
+    </LinearLayout>
+    <com.google.android.material.floatingactionbutton.FloatingActionButton android:id="@+id/captureFab" android:layout_width="wrap_content" android:layout_height="wrap_content" android:visibility="gone" android:contentDescription="@string/start_capture" app:srcCompat="@drawable/ic_play"/>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
