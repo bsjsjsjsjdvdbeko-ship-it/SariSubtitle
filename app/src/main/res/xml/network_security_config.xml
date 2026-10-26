@@ -1,5 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
     <base-config cleartextTrafficPermitted="false">
-        <trust-anchors><certificates src="system"/></trust-anchors>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
     </base-config>
+    <!-- OmniRoute may run locally in Termux on the same device. Plain HTTP is allowed only for loopback. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
 </network-security-config>

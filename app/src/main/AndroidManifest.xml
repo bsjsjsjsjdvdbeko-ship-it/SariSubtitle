@@ -19,7 +19,6 @@
         <activity android:name=".BrowserActivity" android:exported="false" />
         <activity android:name=".VideoPlayerActivity" android:exported="false" />
         <activity android:name=".ProviderDashboardActivity" android:exported="false" />
-        <activity android:name=".SettingsSttActivity" android:exported="false" />
         <activity android:name=".SettingsKeysActivity" android:exported="false" />
         <activity android:name=".SettingsLanguagesActivity" android:exported="false" />
         <activity android:name=".SettingsAppearanceActivity" android:exported="false" />
@@ -28,6 +27,7 @@
         <activity android:name=".SettingsOmniRouteActivity" android:exported="false" />
         <activity android:name=".SettingsOrchestrationActivity" android:exported="false" />
         <activity android:name=".SettingsAboutActivity" android:exported="false" />
+        <activity android:name=".SettingsSttActivity" android:exported="false" />
         <activity android:name=".SettingsActivity" android:exported="false" />
         <activity android:name=".HistoryActivity" android:exported="false" />
         <activity android:name=".SplashActivity" android:exported="false" />

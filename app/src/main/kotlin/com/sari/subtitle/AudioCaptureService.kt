@@ -146,13 +146,10 @@ class AudioCaptureService : Service() {
                 }
             }
             audioRecord.startRecording()
-            getSharedPreferences(STATE_PREFS, MODE_PRIVATE).edit().putBoolean(KEY_RUNNING, true).apply()
-            sendCaptureState(true, null)
             captureThread = Thread({ captureLoop(audioRecord) }, "SariAudioCapture").apply { start() }
             Log.i(TAG, "Device playback capture started.")
         } catch (e: Exception) {
             Log.e(TAG, "Could not start audio capture", e)
-            sendCaptureState(false, e.message ?: "تعذر بدء الالتقاط")
             stopCapture()
             startService(Intent(this, OverlayService::class.java).setAction(OverlayService.ACTION_UPDATE)
                 .putExtra(OverlayService.EXTRA_ORIGINAL, "Audio capture failed")
@@ -203,10 +200,7 @@ class AudioCaptureService : Service() {
     }
 
     private fun stopCapture() {
-        val wasRunning = running || getSharedPreferences(STATE_PREFS, MODE_PRIVATE).getBoolean(KEY_RUNNING, false)
         running = false
-        getSharedPreferences(STATE_PREFS, MODE_PRIVATE).edit().putBoolean(KEY_RUNNING, false).apply()
-        if (wasRunning) sendCaptureState(false, null)
         try { recorder?.stop() } catch (_: Exception) { }
         try { recorder?.release() } catch (_: Exception) { }
         recorder = null
@@ -226,9 +220,6 @@ class AudioCaptureService : Service() {
     }
 
     override fun onDestroy() {
-        val wasRunning = getSharedPreferences(STATE_PREFS, MODE_PRIVATE).getBoolean(KEY_RUNNING, false)
-        getSharedPreferences(STATE_PREFS, MODE_PRIVATE).edit().putBoolean(KEY_RUNNING, false).apply()
-        if (wasRunning) sendCaptureState(false, null)
         running = false
         try { recorder?.stop() } catch (_: Exception) { }
         try { recorder?.release() } catch (_: Exception) { }
@@ -241,13 +232,6 @@ class AudioCaptureService : Service() {
         super.onDestroy()
     }
 
-    private fun sendCaptureState(active: Boolean, error: String?) {
-        val stateIntent = Intent(ACTION_STATE_CHANGED).setPackage(packageName)
-            .putExtra(EXTRA_STATE_RUNNING, active)
-        if (!error.isNullOrBlank()) stateIntent.putExtra(EXTRA_STATE_ERROR, error)
-        sendBroadcast(stateIntent)
-    }
-
     override fun onBind(intent: Intent?): IBinder? = null
     companion object {
         private const val TAG = "SariAudioCapture"
@@ -257,10 +241,5 @@ class AudioCaptureService : Service() {
         const val ACTION_STOP = "com.sari.subtitle.action.STOP_CAPTURE"
         const val EXTRA_RESULT_CODE = "media_projection_result_code"
         const val EXTRA_RESULT_DATA = "media_projection_result_data"
-        const val ACTION_STATE_CHANGED = "com.sari.subtitle.action.CAPTURE_STATE_CHANGED"
-        const val EXTRA_STATE_RUNNING = "capture_state_running"
-        const val EXTRA_STATE_ERROR = "capture_state_error"
-        const val STATE_PREFS = "capture_state"
-        const val KEY_RUNNING = "running"
     }
 }

@@ -2,30 +2,31 @@ package com.sari.subtitle
 
 import android.content.Intent
 import android.os.Bundle
-import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.appbar.MaterialToolbar
+import com.google.android.material.button.MaterialButton
 
-/** Settings hub. Each card opens a dedicated screen that persists through SettingsRepository. */
+/** Settings landing page. Each card opens one focused settings screen. */
 class SettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
         findViewById<MaterialToolbar>(R.id.settingsToolbar).setNavigationOnClickListener { finish() }
-        val destinations = listOf(
-            R.id.card_keys to SettingsKeysActivity::class.java,
-            R.id.card_stt to SettingsSttActivity::class.java,
-            R.id.card_languages to SettingsLanguagesActivity::class.java,
-            R.id.card_appearance to SettingsAppearanceActivity::class.java,
-            R.id.card_quality to SettingsQualityActivity::class.java,
-            R.id.card_context to SettingsContextActivity::class.java,
-            R.id.card_omniroute to SettingsOmniRouteActivity::class.java,
-            R.id.card_orchestration to SettingsOrchestrationActivity::class.java,
-            R.id.card_history to HistoryActivity::class.java,
-            R.id.card_about to SettingsAboutActivity::class.java
-        )
-        destinations.forEach { (viewId, activityClass) ->
-            findViewById<View>(viewId).setOnClickListener { startActivity(Intent(this, activityClass)) }
+        bind(R.id.openKeysPageButton, SettingsKeysActivity::class.java)
+        bind(R.id.openSttSettingsButton, SettingsSttActivity::class.java)
+        bind(R.id.openLanguagesPageButton, SettingsLanguagesActivity::class.java)
+        bind(R.id.openAppearancePageButton, SettingsAppearanceActivity::class.java)
+        bind(R.id.openQualityPageButton, SettingsQualityActivity::class.java)
+        bind(R.id.openContextPageButton, SettingsContextActivity::class.java)
+        bind(R.id.openOmniRoutePageButton, SettingsOmniRouteActivity::class.java)
+        bind(R.id.openOrchestrationPageButton, SettingsOrchestrationActivity::class.java)
+        bind(R.id.openHistoryPageButton, HistoryActivity::class.java)
+        bind(R.id.openAboutPageButton, SettingsAboutActivity::class.java)
+    }
+
+    private fun bind(viewId: Int, destination: Class<*>) {
+        findViewById<MaterialButton>(viewId).setOnClickListener {
+            startActivity(Intent(this, destination))
         }
     }
 }

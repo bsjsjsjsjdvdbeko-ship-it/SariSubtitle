@@ -44,7 +44,6 @@ class SettingsSttActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val settings = SettingsRepository(this@SettingsSttActivity).load()
             provider.setText(when (settings.sttProvider) { "deepgram" -> providers[1]; "vosk" -> providers[2]; else -> providers[0] }, false)
-            updateVoskStatus()
             deepgramKey.setText(settings.deepgramKey)
             openAiKey.setText(settings.openAiKey)
         }
@@ -58,8 +57,12 @@ class SettingsSttActivity : AppCompatActivity() {
         }
         lifecycleScope.launch {
             try {
-                SettingsRepository(this@SettingsSttActivity).saveSttSettings(
-                    selected, deepgramKey.text?.toString().orEmpty(), openAiKey.text?.toString().orEmpty()
+                val repository = SettingsRepository(this@SettingsSttActivity)
+                val previous = repository.load()
+                repository.saveSttSettings(
+                    selected,
+                    deepgramKey.text?.toString().orEmpty().trim().ifBlank { previous.deepgramKey },
+                    openAiKey.text?.toString().orEmpty().trim().ifBlank { previous.openAiKey }
                 )
                 Toast.makeText(this@SettingsSttActivity, R.string.stt_settings_saved, Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
@@ -89,63 +92,26 @@ class SettingsSttActivity : AppCompatActivity() {
 
     private fun downloadVosk() {
         val dir = File(filesDir, "vosk-models")
-        val validExisting = File(dir, "am").isDirectory && File(dir, "conf").isDirectory
-        if (validExisting) {
-            findViewById<android.widget.TextView>(R.id.voskModelStatus).text = "نموذج Vosk موجود محليًا: ${dir.absolutePath}"
-            Toast.makeText(this, "النموذج موجود بالفعل؛ لن يعاد تنزيله.", Toast.LENGTH_LONG).show()
+        val existingModel = dir.listFiles()?.firstOrNull {
+            it.isDirectory && File(it, "am").isDirectory && File(it, "conf").isDirectory
+        }
+        if (existingModel != null) {
+            Toast.makeText(this, "نموذج Vosk موجود وصالح: ${existingModel.name}", Toast.LENGTH_LONG).show()
             return
         }
-        val staging = File(filesDir, "vosk-models-staging")
-        findViewById<android.widget.TextView>(R.id.voskModelStatus).text =
-            "جارٍ تنزيل النموذج والتحقق منه؛ أداة التنزيل الحالية لا توفر نسبة تقدم."
         Toast.makeText(this, R.string.vosk_download_started, Toast.LENGTH_LONG).show()
         lifecycleScope.launch {
             try {
-                if (staging.exists()) staging.deleteRecursively()
-                val extracted = ModelDownloader.downloadAndExtract(
+                val result = ModelDownloader.downloadAndExtract(
                     this@SettingsSttActivity,
                     "https://alphacephei.com/vosk/models/vosk-model-ar-mgb2-0.4.zip",
-                    staging
+                    dir
                 )
-                val candidate = extracted.listFiles()?.firstOrNull {
-                    it.isDirectory && it.name.startsWith("vosk-model")
-                } ?: extracted
-                val valid = File(candidate, "am").isDirectory && File(candidate, "conf").isDirectory
-                if (!valid) error("اكتمل التنزيل لكن بنية النموذج غير صالحة.")
-                val backup = File(filesDir, "vosk-models-backup")
-                if (backup.exists()) backup.deleteRecursively()
-                if (dir.exists() && !dir.renameTo(backup)) error("تعذر حفظ النموذج السابق بأمان.")
-                if (!candidate.renameTo(dir)) {
-                    try { candidate.copyRecursively(dir, overwrite = true) }
-                    catch (e: Exception) {
-                        if (backup.exists()) backup.renameTo(dir)
-                        throw e
-                    }
-                }
-                if (!(File(dir, "am").isDirectory && File(dir, "conf").isDirectory)) {
-                    dir.deleteRecursively()
-                    if (backup.exists()) backup.renameTo(dir)
-                    error("فشل التحقق النهائي من النموذج.")
-                }
-                backup.deleteRecursively()
-                staging.deleteRecursively()
-                findViewById<android.widget.TextView>(R.id.voskModelStatus).text =
-                    "اكتمل تنزيل النموذج والتحقق منه: ${dir.absolutePath}"
-                Toast.makeText(this@SettingsSttActivity, getString(R.string.vosk_download_done, dir.absolutePath), Toast.LENGTH_LONG).show()
+                Toast.makeText(this@SettingsSttActivity, getString(R.string.vosk_download_done, result.absolutePath), Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
-                staging.deleteRecursively()
-                findViewById<android.widget.TextView>(R.id.voskModelStatus).text =
-                    "فشل تنزيل النموذج: ${e.message ?: "خطأ غير معروف"}"
                 Toast.makeText(this@SettingsSttActivity, getString(R.string.vosk_download_failed, e.message ?: "خطأ غير معروف"), Toast.LENGTH_LONG).show()
             }
         }
-    }
-
-    private fun updateVoskStatus() {
-        val dir = File(filesDir, "vosk-models")
-        val valid = File(dir, "am").isDirectory && File(dir, "conf").isDirectory
-        findViewById<android.widget.TextView>(R.id.voskModelStatus).text =
-            if (valid) "نموذج Vosk موجود محليًا: ${dir.absolutePath}" else "لا يوجد نموذج Vosk صالح مثبت حاليًا."
     }
 
     private fun openUrl(url: String) {

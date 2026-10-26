@@ -66,7 +66,11 @@ class TranslationRepository(private val context: Context) {
         val cached = if (settings.translationMemoryEnabled) memory.find(hash, sourceLanguage, targetLanguage) else null
 
         val translated = cached?.translatedText ?: run {
-            val contextPrompt = if (settings.contextAwareTranslation) episodeContext.snapshot() else TranslationContext()
+            if (settings.contextAwareTranslation) episodeContext.setGlossaryFromText(settings.glossary)
+            val contextPrompt = if (settings.contextAwareTranslation) {
+                val snapshot = episodeContext.snapshot()
+                snapshot.copy(characterNotes = listOf(snapshot.characterNotes, settings.contextPrompt.trim()).filter { it.isNotBlank() }.joinToString("\n"))
+            } else TranslationContext()
             val quality = when (settings.translationQuality) {
                 SettingsRepository.QUALITY_FAST -> TranslationQuality.FAST
                 SettingsRepository.QUALITY_BALANCED -> TranslationQuality.BALANCED
@@ -141,13 +145,12 @@ class TranslationRepository(private val context: Context) {
     }
 
     private fun buildWhisperPrompt(settings: AppSettings, context: TranslationContext): String {
-        val glossary = (context.glossary.entries.map { "${it.key}=${it.value}" } + settings.glossary.lines().map { it.trim() }.filter { it.isNotBlank() }).joinToString(", ")
+        val glossary = context.glossary.entries.joinToString(", ") { "${it.key}=${it.value}" }
         val recent = context.previousSegments.takeLast(4).joinToString(" | ")
         return buildString {
             if (settings.translationQuality == SettingsRepository.QUALITY_HUMAN) append("[HIGH_ACCURACY] ")
             append("Transcribe spoken dialogue accurately. Preserve names, technical terms, places, and recurring words exactly when heard. ")
             if (glossary.isNotBlank()) append("Known terminology: ").append(glossary).append(". ")
-            if (settings.contextPrompt.isNotBlank()) append("Additional translation context: ").append(settings.contextPrompt.take(1000)).append(". ")
             if (recent.isNotBlank()) append("Recent context for spelling only: ").append(recent)
         }.take(3_000)
     }

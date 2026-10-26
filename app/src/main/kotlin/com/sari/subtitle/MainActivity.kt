@@ -3,8 +3,6 @@ package com.sari.subtitle
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
-import android.content.BroadcastReceiver
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
@@ -38,19 +36,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusDot: View
     private var capturing = false
     private var handledIntentSignature: String? = null
-    private var stateReceiverRegistered = false
-    private val captureStateReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context?, intent: Intent?) {
-            if (intent?.action != AudioCaptureService.ACTION_STATE_CHANGED) return
-            val active = intent.getBooleanExtra(AudioCaptureService.EXTRA_STATE_RUNNING, false)
-            setCaptureUi(active)
-            val error = intent.getStringExtra(AudioCaptureService.EXTRA_STATE_ERROR)
-            if (!error.isNullOrBlank()) {
-                status.text = error
-                Toast.makeText(this@MainActivity, error, Toast.LENGTH_LONG).show()
-            }
-        }
-    }
 
     private val projectionLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
@@ -59,8 +44,7 @@ class MainActivity : AppCompatActivity() {
                 .putExtra(AudioCaptureService.EXTRA_RESULT_CODE, result.resultCode)
                 .putExtra(AudioCaptureService.EXTRA_RESULT_DATA, result.data)
             ContextCompat.startForegroundService(this, serviceIntent)
-            status.text = getString(R.string.capture_starting)
-            engineStatus.text = getString(R.string.capture_starting)
+            setCaptureUi(true)
         } else {
             status.text = getString(R.string.capture_permission_denied)
             Toast.makeText(this, R.string.capture_permission_denied, Toast.LENGTH_LONG).show()
@@ -225,25 +209,6 @@ class MainActivity : AppCompatActivity() {
             .putExtra(VideoPlayerActivity.EXTRA_URL, resolved.uri.toString())
         else Intent(this, BrowserActivity::class.java).putExtra(BrowserActivity.EXTRA_URL, resolved.uri.toString())
         startActivity(next)
-    }
-
-    override fun onStart() {
-        super.onStart()
-        if (!stateReceiverRegistered) {
-            ContextCompat.registerReceiver(this, captureStateReceiver, IntentFilter(AudioCaptureService.ACTION_STATE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
-            stateReceiverRegistered = true
-        }
-        val actuallyRunning = getSharedPreferences(AudioCaptureService.STATE_PREFS, MODE_PRIVATE)
-            .getBoolean(AudioCaptureService.KEY_RUNNING, false)
-        setCaptureUi(actuallyRunning)
-    }
-
-    override fun onStop() {
-        if (stateReceiverRegistered) {
-            runCatching { unregisterReceiver(captureStateReceiver) }
-            stateReceiverRegistered = false
-        }
-        super.onStop()
     }
 
     override fun onResume() {

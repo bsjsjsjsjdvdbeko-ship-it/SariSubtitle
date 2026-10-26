@@ -60,8 +60,7 @@
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp"
                         android:text="يتطلب تنزيل نموذج عربي كبير. تأكد من توفر مساحة تخزين واتصال Wi‑Fi قبل البدء."
                         android:textColor="@color/text_secondary" android:textSize="13sp"/>
-                    <TextView android:id="@+id/voskModelStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:textColor="@color/text_secondary" android:textSize="13sp" android:text="جارٍ التحقق من وجود نموذج Vosk…" />
-            <com.google.android.material.button.MaterialButton android:id="@+id/downloadVoskButton"
+                    <com.google.android.material.button.MaterialButton android:id="@+id/downloadVoskButton"
                         android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
                         android:text="@string/download_vosk" app:icon="@drawable/ic_mic"/>
                 </LinearLayout>
