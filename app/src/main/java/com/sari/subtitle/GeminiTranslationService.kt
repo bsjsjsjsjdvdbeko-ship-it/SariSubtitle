@@ -10,7 +10,7 @@ import java.net.URL
 
 /** ترجمة نصوص SRT عبر Gemini؛ يرسل النص فقط ولا يرسل الصوت أو توقيتات الفيديو. */
 object GeminiTranslationService {
-    private const val MODEL = "gemini-2.5-flash"
+    private const val MODEL = "gemini-3.8-flash"
     private const val MAX_BATCH = 8
 
     fun translateBatch(texts: List<String>, sourceLang: String, targetLang: String, apiKey: String): List<String> {

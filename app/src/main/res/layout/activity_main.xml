@@ -2,7 +2,8 @@
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@android:color/black"
+    android:background="@color/sari_background"
+    android:layoutDirection="locale"
     android:fitsSystemWindows="true">
 
     <!-- WebView كامل (95% من الشاشة) -->
@@ -11,7 +12,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_above="@+id/bottomBar"
-        android:layout_below="@+id/topBar" />
+        android:layout_below="@id/operationLogPanel" />
 
     <!-- SubtitleOverlay فوق WebView -->
     <FrameLayout
@@ -19,7 +20,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_above="@+id/bottomBar"
-        android:layout_below="@+id/topBar">
+        android:layout_below="@id/operationLogPanel">
 
         <com.sari.subtitle.SubtitleOverlay
             android:id="@+id/subtitleOverlay"
@@ -35,34 +36,57 @@
         android:layout_height="wrap_content"
         android:layout_alignParentTop="true"
         android:orientation="horizontal"
-        android:padding="4dp"
-        android:background="#1A1A1A">
+        android:paddingStart="12dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:gravity="center_vertical"
+        android:background="@drawable/bg_sari_topbar">
 
         <EditText
             android:id="@+id/urlInput"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:hint="الصق رابط الفيديو هنا…"
+            android:minHeight="48dp"
+            android:hint="@string/hint_url"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="11dp"
+            android:paddingBottom="11dp"
+            android:background="@drawable/bg_sari_input"
+            android:imeOptions="actionGo"
             android:inputType="textUri"
             android:singleLine="true"
             android:textSize="14sp"
-            android:textColor="@android:color/white"
-            android:textColorHint="#B0B0B0" />
+            android:textColor="@color/sari_text_primary"
+            android:textColorHint="@color/sari_text_muted" />
 
         <Button
+            android:textAllCaps="false"
             android:id="@+id/loadButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textSize="11sp"
-            android:text="فتح" />
+            android:textSize="12sp"
+            android:text="@string/btn_load"
+            android:background="@drawable/bg_sari_button_primary"
+            android:textColor="@color/sari_on_accent"
+            android:minHeight="44dp"
+            android:layout_marginStart="6dp" />
 
         <Button
+            android:textAllCaps="false"
             android:id="@+id/settingsButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textSize="14sp"
-            android:text="⚙️" />
+            android:textSize="18sp"
+            android:text="⚙"
+            android:contentDescription="@string/btn_settings"
+            android:background="@drawable/bg_sari_button_secondary"
+            android:textColor="@color/sari_text_primary"
+            android:minWidth="44dp"
+            android:minHeight="44dp"
+            android:layout_marginStart="4dp" />
 
     </LinearLayout>
 
@@ -75,9 +99,9 @@
         android:padding="6dp"
         android:fontFamily="sans"
         android:textSize="12sp"
-        android:textColor="#FFFFFF"
+        android:textColor="@color/sari_text_primary"
         android:maxLines="3"
-        android:background="#CC202020"
+        android:background="@drawable/bg_sari_status"
         android:visibility="gone"
         android:text="@string/status_ready" />
 
@@ -87,101 +111,128 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_below="@+id/topBar"
+        android:layout_above="@+id/bottomBar"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingStart="8dp"
+        android:paddingStart="12dp"
         android:paddingEnd="8dp"
-        android:paddingTop="2dp"
-        android:paddingBottom="2dp"
-        android:background="#D91A1A1A">
+        android:paddingTop="7dp"
+        android:paddingBottom="7dp"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="10dp"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_sari_panel">
         <TextView
             android:id="@+id/operationLogText"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="سجل العمليات: جاهز"
-            android:textColor="#FFFFFF"
+            android:text="@string/operation_log_ready"
+            android:textColor="@color/sari_text_primary"
             android:textSize="11sp"
             android:maxLines="2" />
         <Button
+            android:textAllCaps="false"
             android:id="@+id/operationLogButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:minHeight="36dp"
-            android:textSize="10sp"
-            android:text="السجل" />
+            android:minHeight="40dp"
+            android:textSize="11sp"
+            android:text="@string/btn_history"
+            android:background="@drawable/bg_sari_button_secondary"
+            android:textColor="@color/sari_text_primary" />
     </LinearLayout>
 
-    <!-- شريط المهام الرئيسي: بدء تلقائي، اختيار ملف ذكي، ومكتبة محفوظات -->
+    <!-- Primary action + compact secondary actions. Existing view IDs remain stable. -->
     <LinearLayout
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
-        android:orientation="horizontal"
-        android:gravity="center"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp"
-        android:paddingTop="6dp"
-        android:paddingBottom="24dp"
-        android:background="#1A1A1A">
+        android:orientation="vertical"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:background="@drawable/bg_sari_bottombar">
 
         <Button
+            android:textAllCaps="false"
             android:id="@+id/menuButton"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1.15"
-            android:minHeight="54dp"
-            android:layout_marginEnd="4dp"
-            android:textSize="13sp"
+            android:minHeight="48dp"
+            android:layout_marginBottom="8dp"
+            android:textSize="14sp"
             android:textStyle="bold"
-            android:text="ابدأ الترجمة"
-            android:contentDescription="ابدأ ترجمة الفيديو تلقائيًا بالعربية من الرابط الحالي أو المنسوخ" />
+            android:text="@string/btn_start_translation"
+            android:background="@drawable/bg_sari_button_primary"
+            android:textColor="@color/sari_on_accent"
+            android:contentDescription="@string/desc_start_translation" />
 
-        <Button
-            android:id="@+id/loadSrtButton"
-            android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="0.88"
-            android:minHeight="54dp"
-            android:layout_marginHorizontal="3dp"
-            android:textSize="12sp"
-            android:text="ملف ترجمة"
-            android:contentDescription="اختر ملف ترجمة؛ يكتشف التطبيق اللغة ويترجمه إلى العربية أو يعرضه إذا كان عربيًا" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layoutDirection="locale">
 
-        <Button
-            android:id="@+id/dubbingButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="0.72"
-            android:minHeight="54dp"
-            android:layout_marginHorizontal="2dp"
-            android:textSize="10sp"
-            android:text="دبلجة"
-            android:contentDescription="تشغيل أو إيقاف الدبلجة العربية؛ اضغط مطولاً لإظهار أو إخفاء الترجمة المكتوبة" />
+            <Button
+                android:textAllCaps="false"
+                android:id="@+id/loadSrtButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1.05"
+                android:minHeight="46dp"
+                android:layout_marginEnd="3dp"
+                android:textSize="11sp"
+                android:text="@string/btn_subtitle_file"
+                android:background="@drawable/bg_sari_button_secondary"
+                android:textColor="@color/sari_text_primary"
+                android:contentDescription="@string/desc_subtitle_file" />
 
-        <Button
-            android:id="@+id/dubbingExportButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="0.88"
-            android:minHeight="54dp"
-            android:layout_marginHorizontal="2dp"
-            android:textSize="9sp"
-            android:text="تصدير الدبلجة"
-            android:contentDescription="توليد وحفظ ملف WAV للدبلجة العربية مع الحفاظ على توقيتات SRT" />
+            <Button
+                android:textAllCaps="false"
+                android:id="@+id/dubbingButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.8"
+                android:minHeight="46dp"
+                android:layout_marginHorizontal="3dp"
+                android:textSize="11sp"
+                android:text="@string/btn_dubbing"
+                android:background="@drawable/bg_sari_button_secondary"
+                android:textColor="@color/sari_text_primary"
+                android:contentDescription="@string/desc_dubbing" />
 
-        <Button
-            android:id="@+id/savedItemsButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="0.70"
-            android:minHeight="54dp"
-            android:layout_marginStart="4dp"
-            android:textSize="12sp"
-            android:text="ملفاتي"
-            android:contentDescription="افتح ملفات الترجمة المحفوظة أو احذفها" />
+            <Button
+                android:textAllCaps="false"
+                android:id="@+id/dubbingExportButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1.05"
+                android:minHeight="46dp"
+                android:layout_marginHorizontal="3dp"
+                android:textSize="10sp"
+                android:text="@string/btn_export_dubbing"
+                android:background="@drawable/bg_sari_button_secondary"
+                android:textColor="@color/sari_text_primary"
+                android:contentDescription="@string/desc_export_dubbing" />
 
+            <Button
+                android:textAllCaps="false"
+                android:id="@+id/savedItemsButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.8"
+                android:minHeight="46dp"
+                android:layout_marginStart="3dp"
+                android:textSize="11sp"
+                android:text="@string/btn_my_files"
+                android:background="@drawable/bg_sari_button_secondary"
+                android:textColor="@color/sari_text_primary"
+                android:contentDescription="@string/desc_my_files" />
+        </LinearLayout>
     </LinearLayout>
 
     <!-- أزرار مخفية للاستخدام القديم (مخفية) -->
@@ -190,22 +241,22 @@
         android:layout_height="0dp"
         android:visibility="gone">
 
-        <Button android:id="@+id/toggleOverlayButton" android:layout_width="1dp" android:layout_height="1dp" />
-        <Button android:id="@+id/transcribeXAutoButton" android:layout_width="1dp" android:layout_height="1dp" />
-        <Button android:id="@+id/testCaptureButton" android:layout_width="1dp" android:layout_height="1dp" />
-        <Button android:id="@+id/transcribeAudioButton" android:layout_width="1dp" android:layout_height="1dp" />
-        <Button android:id="@+id/transcribeDirectMediaUrlButton" android:layout_width="1dp" android:layout_height="1dp" />
-        <Button android:id="@+id/importSrtFromUrlButton" android:layout_width="1dp" android:layout_height="1dp" />
-        <Button android:id="@+id/analyzeLinkButton" android:layout_width="1dp" android:layout_height="1dp" />
-        <Button android:id="@+id/generateSrtFromLinkButton" android:layout_width="1dp" android:layout_height="1dp" />
-        <Button android:id="@+id/pasteLinkTranscribeButton" android:layout_width="1dp" android:layout_height="1dp" />
-        <Button android:id="@+id/copyLinkOnlyButton" android:layout_width="1dp" android:layout_height="1dp" />
-        <Button android:id="@+id/translateSrtButton" android:layout_width="1dp" android:layout_height="1dp" />
-        <Button android:id="@+id/offsetMinusButton" android:layout_width="1dp" android:layout_height="1dp" />
-        <Button android:id="@+id/offsetPlusButton" android:layout_width="1dp" android:layout_height="1dp" />
-        <Button android:id="@+id/offsetResetButton" android:layout_width="1dp" android:layout_height="1dp" />
-        <Button android:id="@+id/checkTimeButton" android:layout_width="1dp" android:layout_height="1dp" />
-        <Button android:id="@+id/reloadXButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/toggleOverlayButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/transcribeXAutoButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/testCaptureButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/transcribeAudioButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/transcribeDirectMediaUrlButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/importSrtFromUrlButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/analyzeLinkButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/generateSrtFromLinkButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/pasteLinkTranscribeButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/copyLinkOnlyButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/translateSrtButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/offsetMinusButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/offsetPlusButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/offsetResetButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/checkTimeButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/reloadXButton" android:layout_width="1dp" android:layout_height="1dp" />
 
     </LinearLayout>
 

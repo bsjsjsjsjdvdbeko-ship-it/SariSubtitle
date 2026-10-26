@@ -337,7 +337,7 @@ object SrtTranslationService {
                 if (!geminiAvailable) return null
                 if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
                 val attemptStarted = android.os.SystemClock.elapsedRealtime()
-                val model = "gemini-2.5-flash"
+                val model = "gemini-3.8-flash"
                 logAttempt("Gemini", model, attemptStarted, "قيد التنفيذ", "${batchTexts.size} نص", "جارٍ طلب الترجمة")
                 return try {
                     val result = validateBatch("Gemini", GeminiTranslationService.translateBatch(batchTexts, sourceLang, targetLang, geminiKey))
@@ -346,9 +346,18 @@ object SrtTranslationService {
                     result
                 } catch (e: Exception) {
                     if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
-                    val reason = (e.message ?: e.javaClass.simpleName).take(350)
-                    providerFailures += "Gemini: $reason"
-                    Log.e(TAG, "Gemini translation batch failed; configured route will continue to next text provider. source=$sourceLang target=$targetLang batchSize=${batchTexts.size} reason=$reason", e)
+                    val rawReason = (e.message ?: e.javaClass.simpleName).take(350)
+                    val modelUnavailable = rawReason.contains("HTTP 404", ignoreCase = true) ||
+                        rawReason.contains("no longer available", ignoreCase = true) ||
+                        rawReason.contains("model not found", ignoreCase = true) ||
+                        rawReason.contains("not found for API version", ignoreCase = true)
+                    val reason = if (modelUnavailable) {
+                        "Gemini: النموذج $model غير متاح أو غير مفعّل لهذا المفتاح؛ جاري استخدام المزود التالي. التفاصيل: $rawReason"
+                    } else {
+                        "Gemini فشل؛ جاري استخدام المزود التالي. السبب: $rawReason"
+                    }.take(700)
+                    providerFailures += reason
+                    Log.e(TAG, "Gemini translation batch failed; configured route will continue to next text provider. source=$sourceLang target=$targetLang batchSize=${batchTexts.size} model=$model reason=$reason", e)
                     logAttempt("Gemini", model, attemptStarted, "فشل", "لم تُقبل أي نتيجة", reason)
                     geminiAvailable = false
                     null
@@ -395,7 +404,7 @@ object SrtTranslationService {
                     else -> "بدائل نصية (Azure/Hugging Face/DeepL)"
                 }
                 val model = when (batchProvider) {
-                    "Gemini" -> "gemini-2.5-flash"
+                    "Gemini" -> "gemini-3.8-flash"
                     "OmniRoute" -> settings?.omniRouteTextModel?.trim().orEmpty().ifBlank { "auto" }
                     else -> "provider fallback chain"
                 }

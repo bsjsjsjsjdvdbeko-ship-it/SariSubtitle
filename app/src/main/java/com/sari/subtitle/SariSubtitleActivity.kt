@@ -2984,7 +2984,7 @@ private fun openAudioPicker() {
             dubbingEnabled = false
             lastDubbingCueStartMs = -1L
             textToSpeech?.stop()
-            findViewById<Button>(R.id.dubbingButton).text = "دبلجة"
+            findViewById<Button>(R.id.dubbingButton).text = getString(R.string.btn_dubbing)
             pollCurrentTimeOnce()
         }
         recordOperation("تصدير دبلجة WAV", "Android TextToSpeech", textToSpeech?.defaultEngine ?: "unknown",
@@ -3057,7 +3057,7 @@ private fun openAudioPicker() {
         dubbingEnabled = !dubbingEnabled
         lastDubbingCueStartMs = -1L
         if (!dubbingEnabled) { textToSpeech?.stop(); textToSpeech?.setSpeechRate(1.0f) }
-        findViewById<Button>(R.id.dubbingButton).text = if (dubbingEnabled) "إيقاف الدبلجة" else "دبلجة"
+        findViewById<Button>(R.id.dubbingButton).text = getString(if (dubbingEnabled) R.string.btn_stop_dubbing else R.string.btn_dubbing)
         statusText.visibility = android.view.View.VISIBLE
         statusText.text = if (dubbingEnabled) "الدبلجة العربية تعمل. تم كتم صوت الفيديو الأصلي. اضغط مطولاً على زر الدبلجة لإظهار/إخفاء النص." else "تم إيقاف الدبلجة وإعادة صوت الفيديو إلى حالته السابقة."
         pollCurrentTimeOnce()
@@ -3090,7 +3090,7 @@ private fun openAudioPicker() {
         val translationSummary = latest?.operation in setOf("ترجمة SRT تلقائية", "ترجمة ملف SRT")
         val display = if (translationSummary && latestProviderAttempt != null && latestSrtServiceEvent != null &&
             latestProviderAttempt.time >= latestSrtServiceEvent.time) latestProviderAttempt else latest
-        operationLogText.text = if (display == null) "سجل العمليات: جاهز" else
+        operationLogText.text = if (display == null) getString(R.string.operation_log_ready) else
             "${display.operation} · ${display.status} · ${display.provider}/${display.model} · ${display.durationMs}ms" +
                 (if (display.result.isNotBlank()) " · ${display.result}" else "") +
                 (if (display.detail.isNotBlank()) " · ${display.detail}" else "")

@@ -34,40 +34,44 @@ class LocalMediaPlayerActivity : Activity() {
         try {
             val uri = intent?.data
             if (uri == null || (uri.scheme != "content" && uri.scheme != "file")) {
-                showOpenError("لا يمكن فتح هذا الملف: رابط الفيديو المحلي غير صالح.")
+                showOpenError(getString(R.string.local_player_invalid_uri))
                 return
             }
             val srt = intent.getStringExtra(EXTRA_SRT).orEmpty()
             cues = try { SrtParser.parse(srt.byteInputStream(Charsets.UTF_8)) } catch (_: Exception) { emptyList() }
             val root = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
+                layoutDirection = android.view.View.LAYOUT_DIRECTION_LOCALE
                 setPadding(12, 12, 12, 12)
             }
             root.addView(TextView(this).apply {
-                text = intent.getStringExtra(EXTRA_TITLE)?.takeIf { it.isNotBlank() } ?: "مشغّل الفيديو المحلي"
+                text = intent.getStringExtra(EXTRA_TITLE)?.takeIf { it.isNotBlank() } ?: getString(R.string.local_player_title)
                 textSize = 18f
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             val player = VideoView(this)
             video = player
             root.addView(player, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             subtitleView = TextView(this).apply {
-                text = if (cues.isEmpty()) "لا توجد ترجمة صالحة مرتبطة بهذا الفيديو" else ""
+                text = if (cues.isEmpty()) getString(R.string.local_player_no_subtitles) else ""
                 textSize = 19f
                 gravity = android.view.Gravity.CENTER
                 setPadding(12, 12, 12, 12)
             }
             root.addView(subtitleView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            controls.addView(Button(this).apply { text = "رجوع 10 ثوانٍ"; setOnClickListener { safeSeek(-10_000) } })
-            controls.addView(Button(this).apply { text = "تشغيل/إيقاف"; setOnClickListener { safeToggle() } })
-            controls.addView(Button(this).apply { text = "تقديم 10 ثوانٍ"; setOnClickListener { safeSeek(10_000) } })
+            val controls = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutDirection = android.view.View.LAYOUT_DIRECTION_LOCALE
+            }
+            controls.addView(Button(this).apply { text = getString(R.string.local_player_back_10); setOnClickListener { safeSeek(-10_000) } })
+            controls.addView(Button(this).apply { text = getString(R.string.local_player_toggle); setOnClickListener { safeToggle() } })
+            controls.addView(Button(this).apply { text = getString(R.string.local_player_forward_10); setOnClickListener { safeSeek(10_000) } })
             root.addView(controls)
             setContentView(root)
 
             player.setMediaController(MediaController(this))
             player.setOnPreparedListener { mp ->
                 try { mp.isLooping = false; player.start(); startSubtitleTicker() }
-                catch (_: Exception) { showOpenError("لا يمكن تشغيل هذا الملف.") }
+                catch (_: Exception) { showOpenError(getString(R.string.local_player_play_failed)) }
             }
             player.setOnErrorListener { _, _, _ ->
                 // Content providers sometimes expose streams VideoView cannot seek; copy once to cache.
@@ -78,11 +82,11 @@ class LocalMediaPlayerActivity : Activity() {
                         player.setVideoURI(Uri.fromFile(copy))
                     } catch (error: Exception) {
                         android.util.Log.e("SariMyFiles", "Failed to recover content URI after playback error", error)
-                        showOpenError("تعذّر فتح الفيديو. تحقق من صلاحية الملف وأن صيغته مدعومة.")
+                        showOpenError(getString(R.string.local_player_video_failed))
                     }
                 } else {
                     android.util.Log.e("SariMyFiles", "VideoView reported an unsupported or unreadable video")
-                    showOpenError("تعذّر تشغيل الفيديو؛ قد يكون تالفًا أو بصيغة غير مدعومة.")
+                    showOpenError(getString(R.string.local_player_unsupported))
                 }
                 true
             }
@@ -90,12 +94,12 @@ class LocalMediaPlayerActivity : Activity() {
             catch (_: Exception) {
                 if (uri.scheme == "content") {
                     try { val copy = copyContentUriToCache(uri); cachedFile = copy; player.setVideoURI(Uri.fromFile(copy)) }
-                    catch (_: Exception) { showOpenError("لا يمكن فتح هذا الملف.") }
-                } else showOpenError("لا يمكن فتح هذا الملف.")
+                    catch (_: Exception) { showOpenError(getString(R.string.local_player_open_failed)) }
+                } else showOpenError(getString(R.string.local_player_open_failed))
             }
         } catch (error: Exception) {
             android.util.Log.e("SariMyFiles", "Failed to initialize local media player", error)
-            showOpenError("تعذّر فتح الفيديو بسبب خطأ أثناء تهيئة المشغّل. جرّب ملف فيديو آخر.")
+            showOpenError(getString(R.string.local_player_init_failed))
         }
     }
 
@@ -112,14 +116,14 @@ class LocalMediaPlayerActivity : Activity() {
             val v = video ?: return
             val duration = v.duration.coerceAtLeast(0)
             v.seekTo((v.currentPosition + delta).coerceIn(0, if (duration > 0) duration else Int.MAX_VALUE))
-        } catch (_: Exception) { Toast.makeText(this, "تعذّر تغيير موضع الفيديو", Toast.LENGTH_SHORT).show() }
+        } catch (_: Exception) { Toast.makeText(this, getString(R.string.local_player_seek_failed), Toast.LENGTH_SHORT).show() }
     }
 
     private fun safeToggle() {
         try { val v = video ?: return; if (v.isPlaying) v.pause() else v.start() }
         catch (error: Exception) {
             android.util.Log.w("SariMyFiles", "Play/pause failed", error)
-            Toast.makeText(this, "تعذّر تشغيل الفيديو", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.local_player_toggle_failed), Toast.LENGTH_SHORT).show()
         }
     }
 
