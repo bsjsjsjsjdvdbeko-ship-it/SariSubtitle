@@ -94,6 +94,14 @@ object OperationLogStore {
                 (context.resources.displayMetrics.heightPixels * 0.78f).toInt())
     }
 
-    private fun clean(value: String): String = value.replace(Regex("(?i)(api[_ -]?key|authorization|bearer)\\s*[:=]?\\s*\\S+"), "${'$'}1=[REDACTED]")
-        .replace(Regex("[\\r\\n\\t]+"), " ").take(500)
+    private fun clean(value: String): String = sanitizeLogValue(value)
+
+    /** Pure sanitizer shared with unit tests; sensitive values must never enter persisted history. */
+    internal fun sanitizeLogValue(value: String): String = value
+        // Authorization headers may contain a scheme and token separated by spaces;
+        // redact the whole header value before the generic key/token patterns run.
+        .replace(Regex("(?i)(authorization)\\s*[:=]\\s*[^\\r\\n]+"), "${'$'}1=[REDACTED]")
+        .replace(Regex("(?i)(api[_ -]?key|bearer)\\s*[:=]?\\s*\\S+"), "${'$'}1=[REDACTED]")
+        .replace(Regex("[\\r\\n\\t]+"), " ")
+        .take(500)
 }

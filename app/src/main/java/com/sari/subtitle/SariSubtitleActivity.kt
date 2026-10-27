@@ -5,11 +5,15 @@ import com.sari.subtitle.v2.R
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ProgressDialog
+import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -29,6 +33,8 @@ import android.widget.Spinner
 import android.widget.TextView
 import android.widget.EditText
 import android.widget.Toast
+import android.media.projection.MediaProjectionManager
+import android.content.pm.PackageManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
@@ -59,6 +65,8 @@ class SariSubtitleActivity : AppCompatActivity() {
         private const val REQ_SAVE_TRANSLATED_SRT = 1003
         private const val OFFSET_STEP_MS = 500L
         private const val PREF_LAST_CACHED_VIDEO_URL = "last_cached_video_url"
+        private const val REQ_LIVE_AUDIO_PERMISSION = 4101
+        private const val REQ_LIVE_MEDIA_PROJECTION = 4102
     }
 
     private lateinit var urlInput: EditText
@@ -101,6 +109,20 @@ class SariSubtitleActivity : AppCompatActivity() {
     private var pendingTranslatedSrt: String? = null
     /** URL requested by the one-tap workflow; capture begins after WebView loads it. */
     private var pendingAutoCaptureUrl: String? = null
+
+    private var liveReceiverRegistered = false
+    private var lastLiveSessionId = Long.MIN_VALUE
+    private var lastLiveSequence = Long.MIN_VALUE
+    private var lastLiveRevision = -1
+    private val liveSubtitleQueue = LiveSubtitleQueue()
+    private val liveSubtitleReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                LiveSubtitleBus.ACTION_CUE -> handleLiveCue(intent)
+                LiveSubtitleBus.ACTION_STATUS -> handleLiveStatus(intent)
+            }
+        }
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -181,7 +203,10 @@ class SariSubtitleActivity : AppCompatActivity() {
         // ═══════════════════════════════════════════════════════════
         webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
             try {
-                android.util.Log.d("SariDownload", "Download request: $url (mime=$mimeType, length=$contentLength)")
+                // Download URLs may contain signed tokens or private query parameters. Log only the host.
+                val downloadHost = runCatching { android.net.Uri.parse(url).host }
+                    .getOrNull()?.take(120) ?: "local-or-inline"
+                android.util.Log.d("SariDownload", "Download request: host=$downloadHost (mime=$mimeType, length=$contentLength)")
                 
                 // إذا كان blob: → نحتاج JS لتحويله إلى base64
                 if (url.startsWith("blob:") || url.startsWith("data:")) {
@@ -299,8 +324,14 @@ class SariSubtitleActivity : AppCompatActivity() {
 
         // الزر الرئيسي يحترم محرك المعالجة المختار في الإعدادات.
         // المحرك الداخلي يترجم SRT داخل التطبيق ولا يفتح SubWhisper تلقائياً.
-        findViewById<Button>(R.id.menuButton).setOnClickListener {
-            startPrimaryTranslationFlow()
+        findViewById<Button>(R.id.menuButton).apply {
+            setOnClickListener {
+                startPrimaryTranslationFlow()
+            }
+            setOnLongClickListener {
+                toggleLiveCapture()
+                true
+            }
         }
 
         // واجهة المستخدم الرئيسية تعرض الوظائف الأساسية فقط؛ المحفوظات لا تحتاج إعادة تفريغ.
@@ -344,9 +375,7 @@ class SariSubtitleActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.settingsButton).setOnClickListener {
-            SettingsDialog.show(this, settings, subtitleOverlay) {
-                Toast.makeText(this, "✅ تم حفظ الإعدادات", Toast.LENGTH_SHORT).show()
-            }
+            startActivity(Intent(this, SettingsCenterActivity::class.java))
         }
 
         findViewById<Button>(R.id.offsetMinusButton).setOnClickListener {
@@ -1499,7 +1528,10 @@ class SariSubtitleActivity : AppCompatActivity() {
     }
     
     private fun startCurrentWebVideoRecording(duration: Double) {
-        val recordDurationMs = (minOf(duration * 1000.0, 120000.0)).toInt()
+        // Unknown/infinite duration is common for live or segmented web media. Keep a bounded
+        // capture window instead of passing 0 to setTimeout (which would stop immediately).
+        val safeDurationSeconds = if (duration.isFinite() && duration > 0.0) duration else 120.0
+        val recordDurationMs = minOf(safeDurationSeconds * 1000.0, 120000.0).toInt().coerceAtLeast(1000)
         val progress = android.app.ProgressDialog(this).apply {
             setTitle("🎙️ تسجيل الصوت")
             setMessage("جارٍ التسجيل…")
@@ -1530,9 +1562,9 @@ class SariSubtitleActivity : AppCompatActivity() {
                   v = all[0];
                 }
                 
-                // 🔴 إلغاء الكتم
-                v.muted = false;
-                v.volume = 1.0;
+                // Never override the user's mute/volume preferences. captureStream reads the
+                // media element's audio track; changing playback volume is intrusive and can
+                // cause audible jumps during transcription.
                 
                 // 🔴 شغّل الفيديو
                 if (v.paused) {
@@ -2048,9 +2080,10 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         val selected = settings.sttProvider
         val hasLocalModel = VoskModelManager.isInstalled(applicationContext, VoskModelManager.ARABIC) ||
             VoskModelManager.isInstalled(applicationContext, VoskModelManager.ENGLISH)
-        val cloudProviders = when (selected) {
+        val cloudPool = when (selected) {
             SubtitleSettings.STT_LOCAL -> emptyList()
-            // Keep runtime behavior aligned with settings: Groq -> Deepgram -> local Vosk.
+            // Stage 38: runtime routing starts from the user's selected policy, then
+            // reorders only the configured cloud providers using measured health.
             SubtitleSettings.STT_AUTO -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
             SubtitleSettings.STT_DEEPGRAM -> listOf(SubtitleSettings.STT_DEEPGRAM, SubtitleSettings.STT_GROQ)
             SubtitleSettings.STT_GROQ -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
@@ -2060,8 +2093,30 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
             SubtitleSettings.STT_OPENAI -> settings.openAiApiKey.isNotBlank()
             else -> settings.groqApiKey.isNotBlank()
         } }
+        val adaptiveProfile = AdaptiveContextStore.get(applicationContext)
+        val adaptiveSnapshot = AdaptiveRoutingEngine.snapshot(
+            context = applicationContext,
+            task = ProviderScoringEngine.Task.STT,
+            sourceLanguage = language,
+            audioDurationMs = null,
+            chunkDurationMs = adaptiveProfile.typicalChunkDurationMs,
+            speechSpeedWpm = adaptiveProfile.speechSpeedWpm
+        )
+        val routedCloud = ProviderRoutingEngine.choose(
+            applicationContext,
+            cloudPool.map(::sttProviderHealthId),
+            configured = { healthId -> when (healthId) {
+                ProviderConnectionTester.GROQ -> settings.groqApiKey.isNotBlank()
+                ProviderConnectionTester.DEEPGRAM -> settings.deepgramApiKey.isNotBlank()
+                ProviderConnectionTester.OPENAI -> settings.openAiApiKey.isNotBlank()
+                else -> false
+            } },
+            forceProvider = if (selected == SubtitleSettings.STT_AUTO || selected == SubtitleSettings.STT_LOCAL) null else sttProviderHealthId(selected),
+            task = ProviderScoringEngine.Task.STT,
+            adaptiveContext = adaptiveSnapshot
+        ).map { sttHealthIdToProvider(it.id) }.filter { it in cloudPool }
         val providers = if (selected == SubtitleSettings.STT_LOCAL) listOf(SubtitleSettings.STT_LOCAL)
-            else cloudProviders + if (hasLocalModel) listOf(SubtitleSettings.STT_LOCAL) else emptyList()
+            else routedCloud + cloudPool.filter { it !in routedCloud } + if (hasLocalModel) listOf(SubtitleSettings.STT_LOCAL) else emptyList()
 
         if (providers.isEmpty()) {
             val message = if (selected == SubtitleSettings.STT_AUTO)
@@ -2089,8 +2144,22 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
             }
             try {
                 val result = call(provider)
+                if (provider != SubtitleSettings.STT_LOCAL) {
+                    ProviderRoutingEngine.recordSuccess(
+                        applicationContext,
+                        sttProviderHealthId(provider),
+                        (android.os.SystemClock.elapsedRealtime() - attemptStarted).coerceAtLeast(0L),
+                        "نجح طلب STT الفعلي"
+                    )
+                }
+                val observedDurationMs = AdaptiveRoutingEngine.srtDurationMs(result.srt)
+                val observedWpm = observedDurationMs?.let { AdaptiveRoutingEngine.wordsPerMinute(result.text, it) }
+                if (observedWpm != null) AdaptiveContextStore.recordSpeechSpeed(applicationContext, observedWpm)
+                if (observedDurationMs != null && result.segmentCount > 0) {
+                    AdaptiveContextStore.recordChunkDuration(applicationContext, observedDurationMs / result.segmentCount.coerceAtLeast(1))
+                }
                 recordOperation("تحويل الصوت إلى نص", providerName, modelName, attemptStarted, "نجاح",
-                    "${result.segmentCount} مقطع", "اللغة=${result.language}; selected=${selected}")
+                    "${result.segmentCount} مقطع", "اللغة=${result.language}; selected=${selected}; adaptiveWpm=${observedWpm ?: "unknown"}")
                 if (provider != selected) {
                     val label = when (provider) {
                         SubtitleSettings.STT_DEEPGRAM -> "Deepgram"
@@ -2109,6 +2178,14 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                 }
                 return result
             } catch (e: Exception) {
+                if (provider != SubtitleSettings.STT_LOCAL) {
+                    ProviderRoutingEngine.recordFailure(
+                        applicationContext,
+                        sttProviderHealthId(provider),
+                        e,
+                        (android.os.SystemClock.elapsedRealtime() - attemptStarted).coerceAtLeast(0L)
+                    )
+                }
                 val label = when (provider) {
                     SubtitleSettings.STT_DEEPGRAM -> "Deepgram"
                     SubtitleSettings.STT_OPENAI -> "OpenAI"
@@ -2123,6 +2200,18 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         recordOperation("تحويل الصوت إلى نص", "لا يوجد", "fallback exhausted", operationStarted, "فشل",
             "${failures.size} محاولات", failures.joinToString(" | ").take(450))
         throw IllegalStateException("فشلت محاولات التفريغ المتاحة: ${failures.joinToString(" | ")}")
+    }
+
+    private fun sttProviderHealthId(provider: String): String = when (provider) {
+        SubtitleSettings.STT_DEEPGRAM -> ProviderConnectionTester.DEEPGRAM
+        SubtitleSettings.STT_OPENAI -> ProviderConnectionTester.OPENAI
+        else -> ProviderConnectionTester.GROQ
+    }
+
+    private fun sttHealthIdToProvider(provider: String): String = when (provider) {
+        ProviderConnectionTester.DEEPGRAM -> SubtitleSettings.STT_DEEPGRAM
+        ProviderConnectionTester.OPENAI -> SubtitleSettings.STT_OPENAI
+        else -> SubtitleSettings.STT_GROQ
     }
 
     /** مكتبة موحدة: تعرض اسم الترجمة ورابط الفيديو المرتبط بها عند توفره. */
@@ -2659,6 +2748,15 @@ private fun openAudioPicker() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_LIVE_MEDIA_PROJECTION) {
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                startLiveCaptureService(resultCode, data)
+            } else {
+                statusText.text = "تم إلغاء إذن التقاط صوت الوسائط؛ لم تبدأ الترجمة المباشرة."
+                Toast.makeText(this, "تم إلغاء التقاط صوت الوسائط", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
         if (resultCode != Activity.RESULT_OK) return
         if (requestCode == REQ_SUBWHISPER_INTERNAL) {
             var srtText = data?.getStringExtra(SubWhisperInternalActivity.EXTRA_SRT_TEXT)
@@ -3115,6 +3213,8 @@ private fun openAudioPicker() {
     private fun showCompactOperationLog() {
         if (!::operationLogPanel.isInitialized || isFinishing) return
         handler.removeCallbacks(hideOperationLogRunnable)
+        handler.removeCallbacks(liveQueueTick)
+        liveSubtitleQueue.clear()
         operationLogPanel.visibility = android.view.View.VISIBLE
         updatePlaybackAreaForLogPanel()
         handler.postDelayed(hideOperationLogRunnable, 4_500L)
@@ -3207,8 +3307,226 @@ private fun openAudioPicker() {
         showStatus("جارٍ تجهيز الملف الذي طلبت صفحة الويب تنزيله…")
     }
 
+    override fun onStart() {
+        super.onStart()
+        registerLiveReceiver()
+    }
+
+    override fun onStop() {
+        handler.removeCallbacks(liveQueueTick)
+        unregisterLiveReceiver()
+        super.onStop()
+    }
+
+    private fun registerLiveReceiver() {
+        if (liveReceiverRegistered) return
+        val filter = IntentFilter().apply {
+            addAction(LiveSubtitleBus.ACTION_CUE)
+            addAction(LiveSubtitleBus.ACTION_STATUS)
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(liveSubtitleReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(liveSubtitleReceiver, filter)
+        }
+        liveReceiverRegistered = true
+    }
+
+    private fun unregisterLiveReceiver() {
+        if (!liveReceiverRegistered) return
+        try {
+            unregisterReceiver(liveSubtitleReceiver)
+        } catch (_: IllegalArgumentException) {
+            // Receiver was already removed by the framework.
+        }
+        liveReceiverRegistered = false
+    }
+
+    /**
+     * Stage 42 live capture entry point.
+     * Long-press the main translation button to request MediaProjection consent.
+     */
+    private fun toggleLiveCapture() {
+        if (LiveCaptureService.isRunning) {
+            LiveCaptureService.stop(this)
+            statusText.text = "جارٍ إيقاف الترجمة المباشرة…"
+            Toast.makeText(this, "تم طلب إيقاف الالتقاط المباشر", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            Toast.makeText(this, "الالتقاط المباشر لصوت التطبيقات يحتاج Android 10 أو أحدث", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQ_LIVE_AUDIO_PERMISSION)
+            return
+        }
+        requestLiveMediaProjection()
+    }
+
+    private fun requestLiveMediaProjection() {
+        val manager = getSystemService(MediaProjectionManager::class.java)
+        if (manager == null) {
+            Toast.makeText(this, "MediaProjection غير متاح على هذا الجهاز", Toast.LENGTH_LONG).show()
+            return
+        }
+        statusText.visibility = android.view.View.VISIBLE
+        statusText.text = "امنح Sari Subtitle إذن التقاط صوت الوسائط لبدء الترجمة المباشرة…"
+        startActivityForResult(manager.createScreenCaptureIntent(), REQ_LIVE_MEDIA_PROJECTION)
+    }
+
+    private fun startLiveCaptureService(resultCode: Int, data: Intent) {
+        val language = "auto"
+        val provider = settings.sttProvider
+        try {
+            LiveCaptureService.start(this, resultCode, data, language, provider)
+            overlayOn = true
+            subtitlesVisible = true
+            statusText.visibility = android.view.View.VISIBLE
+            statusText.text = "الترجمة المباشرة: جارٍ بدء التقاط صوت الوسائط…"
+        } catch (t: Throwable) {
+            statusText.text = "تعذر بدء الالتقاط المباشر: ${t.message ?: t.javaClass.simpleName}"
+            Toast.makeText(this, "تعذر بدء الالتقاط المباشر", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun handleLiveCue(intent: Intent) {
+        val text = intent.getStringExtra(LiveSubtitleBus.EXTRA_TEXT).orEmpty().trim()
+        if (text.isBlank()) return
+        val provider = intent.getStringExtra(LiveSubtitleBus.EXTRA_PROVIDER).orEmpty()
+        val translationProvider = intent.getStringExtra(LiveSubtitleBus.EXTRA_TRANSLATION_PROVIDER).orEmpty()
+        val sessionId = intent.getLongExtra(LiveSubtitleBus.EXTRA_SESSION_ID, Long.MIN_VALUE)
+        val sequence = intent.getLongExtra(LiveSubtitleBus.EXTRA_SEQUENCE, Long.MIN_VALUE)
+        val revision = intent.getIntExtra(LiveSubtitleBus.EXTRA_REVISION, 0)
+        val isFinal = intent.getBooleanExtra(LiveSubtitleBus.EXTRA_IS_FINAL, true)
+        // Stage 46: never expose an untranslated foreign-language partial as if it were
+        // an Arabic subtitle. FINAL cues are already translated by the service. Arabic
+        // partials may still be useful because they need no translation network request.
+        if (!isFinal && !isArabicLiveText(text)) return
+        if (sessionId != Long.MIN_VALUE && sessionId != lastLiveSessionId) {
+            lastLiveSessionId = sessionId
+            lastLiveSequence = Long.MIN_VALUE
+            lastLiveRevision = -1
+            liveSubtitleQueue.beginSession(sessionId)
+        }
+        if (sequence != Long.MIN_VALUE) {
+            if (sequence < lastLiveSequence) return
+            if (sequence == lastLiveSequence && revision < lastLiveRevision) return
+            lastLiveSequence = maxOf(lastLiveSequence, sequence)
+            if (sequence == lastLiveSequence) lastLiveRevision = maxOf(lastLiveRevision, revision)
+        }
+        val startMs = intent.getLongExtra(LiveSubtitleBus.EXTRA_START_MS, 0L)
+        val endMs = intent.getLongExtra(LiveSubtitleBus.EXTRA_END_MS, startMs + 1_500L)
+        val displayUntilMs = intent.getLongExtra(
+            LiveSubtitleBus.EXTRA_DISPLAY_UNTIL_MS,
+            endMs
+        )
+        val captureStarted = intent.getLongExtra(LiveSubtitleBus.EXTRA_CAPTURE_STARTED_ELAPSED_MS, 0L)
+
+        overlayOn = true
+        subtitlesVisible = true
+
+        val item = LiveSubtitleQueue.Item(
+            sessionId = sessionId,
+            sequence = sequence,
+            revision = revision,
+            text = text,
+            startMs = startMs,
+            endMs = endMs,
+            displayUntilMs = displayUntilMs
+        )
+        if (!liveSubtitleQueue.offer(item)) return
+
+        val route = if (translationProvider.isBlank()) provider else "${provider.substringBefore('→')}→$translationProvider"
+        statusText.visibility = android.view.View.VISIBLE
+        statusText.text = "مباشر • ${if (isFinal) "FINAL" else "PARTIAL"} • ${if (route.isBlank()) "STT→AR" else route} • ${endMs - startMs}ms • queue=${liveSubtitleQueue.size()}"
+        scheduleLiveSubtitleQueue(captureStarted)
+    }
+
+    private fun isArabicLiveText(text: String): Boolean {
+        val arabic = text.count { it in '\u0600'..'\u06FF' }
+        val latin = text.count { it in 'A'..'Z' || it in 'a'..'z' }
+        return arabic >= 2 && arabic >= latin
+    }
+
+    private var liveQueueCaptureStartedElapsedMs = 0L
+    private val liveQueueTick = object : Runnable {
+        override fun run() {
+            if (isFinishing || !overlayOn || !subtitlesVisible) return
+            val captureStarted = liveQueueCaptureStartedElapsedMs
+            val now = if (captureStarted > 0L) {
+                (android.os.SystemClock.elapsedRealtime() - captureStarted).coerceAtLeast(0L)
+            } else {
+                0L
+            }
+            when (val action = liveSubtitleQueue.advance(now)) {
+                is LiveSubtitleQueue.Action.Show -> subtitleOverlay.show(action.item.text)
+                LiveSubtitleQueue.Action.Hide -> subtitleOverlay.hide()
+                LiveSubtitleQueue.Action.Keep -> Unit
+            }
+            if (LiveCaptureService.isRunning) {
+                handler.postDelayed(this, 50L)
+            }
+        }
+    }
+
+    private fun scheduleLiveSubtitleQueue(captureStarted: Long) {
+        if (captureStarted > 0L) liveQueueCaptureStartedElapsedMs = captureStarted
+        handler.removeCallbacks(liveQueueTick)
+        handler.post(liveQueueTick)
+    }
+
+    private fun handleLiveStatus(intent: Intent) {
+        val status = intent.getStringExtra(LiveSubtitleBus.EXTRA_STATUS).orEmpty()
+        val detail = intent.getStringExtra(LiveSubtitleBus.EXTRA_DETAIL).orEmpty()
+        when (status) {
+            "capture_started" -> {
+                val sessionId = intent.getLongExtra(LiveSubtitleBus.EXTRA_SESSION_ID, Long.MIN_VALUE)
+                if (sessionId != Long.MIN_VALUE && sessionId != lastLiveSessionId) {
+                    lastLiveSessionId = sessionId
+                    lastLiveSequence = Long.MIN_VALUE
+                    lastLiveRevision = -1
+                    liveSubtitleQueue.beginSession(sessionId)
+                }
+                statusText.text = "🟢 الترجمة المباشرة تعمل — يتم التقاط صوت الوسائط"
+            }
+            "capture_stopped" -> {
+                statusText.text = "تم إيقاف الترجمة المباشرة"
+                subtitleOverlay.hide()
+            }
+            "backpressure" -> statusText.text = "مباشر: تم إسقاط جزء قديم للحفاظ على التأخير المنخفض"
+            "silence" -> { /* silence is intentionally not shown as an error */ }
+            "provider_error" -> statusText.text = "مباشر: تعذر تفريغ جزء صوتي — سيستمر الالتقاط"
+            "duplicate_suppressed" -> { /* overlap deduplication is expected */ }
+            "translation_success" -> { /* cue itself carries the visible translation */ }
+            "translation_error" -> statusText.text = "مباشر: تعذرت ترجمة جزء — سيستمر الالتقاط"
+            "translation_backpressure" -> statusText.text = "مباشر: تم تجاوز ترجمة قديمة للحفاظ على التأخير المنخفض"
+            "translation_stale" -> { /* stale translation is intentionally suppressed */ }
+            "timeline_stale" -> { /* old timeline cue is intentionally suppressed */ }
+            "timeline_trimmed" -> { /* previous cue was shortened to avoid overlap */ }
+            "capture_error" -> statusText.text = "خطأ في التقاط صوت الوسائط: $detail"
+            else -> if (detail.isNotBlank()) statusText.text = "مباشر: $detail"
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_LIVE_AUDIO_PERMISSION) return
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            requestLiveMediaProjection()
+        } else {
+            Toast.makeText(this, "يجب السماح بإذن الصوت لتفعيل الالتقاط المباشر", Toast.LENGTH_LONG).show()
+            statusText.text = "تم رفض إذن RECORD_AUDIO؛ لم يبدأ الالتقاط."
+        }
+    }
+
     override fun onDestroy() {
         handler.removeCallbacks(hideOperationLogRunnable)
+        handler.removeCallbacks(liveQueueTick)
+        liveSubtitleQueue.clear()
         OperationLogStore.onChanged = null
         activeOperationCancellation?.cancel()
         try { textToSpeech?.stop(); textToSpeech?.shutdown() } catch (_: Exception) {}

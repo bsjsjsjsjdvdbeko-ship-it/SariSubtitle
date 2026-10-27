@@ -6,6 +6,9 @@
     </queries>
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
@@ -20,7 +23,16 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.SariSubtitle">
 
+        <service
+            android:name="com.sari.subtitle.LiveCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
         <activity android:name="com.sari.subtitle.OperationHistoryActivity" android:exported="false" />
+        <activity android:name="com.sari.subtitle.SettingsCenterActivity" android:exported="false" />
+        <activity android:name="com.sari.subtitle.ProviderCenterActivity" android:exported="false" />
+        <activity android:name="com.sari.subtitle.ProviderBenchmarkCenterActivity" android:exported="false" />
+        <activity android:name="com.sari.subtitle.ProviderDecisionDashboardActivity" android:exported="false" />
         <activity android:name="com.sari.subtitle.LocalMediaPlayerActivity" android:exported="false" android:screenOrientation="sensor" />
 
         <activity

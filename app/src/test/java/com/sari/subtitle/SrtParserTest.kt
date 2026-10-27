@@ -55,6 +55,36 @@ class SrtParserTest {
         assertEquals(text.trim(), SrtParser.decode(text.byteInputStream()).trim())
     }
 
+
+    @Test
+    fun rejectsOutOfRangeTimestampFields() {
+        val invalid = "1\n00:61:00,000 --> 00:61:01,000\nInvalid minutes\n\n" +
+            "2\n00:00:61,000 --> 00:01:02,000\nInvalid seconds\n"
+        assertTrue(SrtParser.parse(invalid.byteInputStream()).isEmpty())
+    }
+
+    @Test
+    fun rejectsReversedAndZeroLengthCueIntervals() {
+        val invalid = "1\n00:00:03,000 --> 00:00:02,000\nReversed\n\n" +
+            "2\n00:00:02,000 --> 00:00:02,000\nZero length\n"
+        assertTrue(SrtParser.parse(invalid.byteInputStream()).isEmpty())
+    }
+
+    @Test
+    fun acceptsOneAndTwoDigitFractionsAndNormalizesToMilliseconds() {
+        val text = "1\n00:00:01.2 --> 00:00:02.34\nFractions\n"
+        val cue = SrtParser.parse(text.byteInputStream()).single()
+        assertEquals(1_200L, cue.startMs)
+        assertEquals(2_340L, cue.endMs)
+    }
+
+    @Test
+    fun rejectsMalformedAndOverflowingTimestamps() {
+        val invalid = "1\n00:00:01,1234 --> 00:00:02,000\nToo many fraction digits\n\n" +
+            "2\n999999999999999999999999:00:00,000 --> 00:00:02,000\nOverflow\n"
+        assertTrue(SrtParser.parse(invalid.byteInputStream()).isEmpty())
+    }
+
     @Test
     fun rejectsInvalidSrtWithoutThrowing() {
         assertTrue(SrtParser.parse("not an srt".byteInputStream()).isEmpty())

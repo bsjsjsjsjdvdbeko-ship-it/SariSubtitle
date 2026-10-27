@@ -13,7 +13,13 @@ object GeminiTranslationService {
     private const val MODEL = "gemini-3.8-flash"
     private const val MAX_BATCH = 8
 
-    fun translateBatch(texts: List<String>, sourceLang: String, targetLang: String, apiKey: String): List<String> {
+    fun translateBatch(
+        texts: List<String>,
+        sourceLang: String,
+        targetLang: String,
+        apiKey: String,
+        context: List<String> = emptyList()
+    ): List<String> {
         require(apiKey.isNotBlank()) { "أدخل مفتاح Gemini من إعدادات التطبيق." }
         require(texts.isNotEmpty() && texts.size <= MAX_BATCH) { "حجم دفعة Gemini غير صالح." }
         val input = JSONArray()
@@ -24,7 +30,12 @@ object GeminiTranslationService {
             tone, and subtitle brevity. Do not add explanations, numbering, markdown, or extra text.
             Return ONLY a JSON object with exactly one property named "translations", whose value
             is an array of strings in the same order and exactly the same length as the input array.
-            Do not merge items. Input JSON array:
+            Do not merge items. Use the optional recent conversation context only to resolve
+            pronouns, names, omitted subjects, and terminology. Never translate or repeat the
+            context itself; return only the translations for the current input array.
+            Recent context (may be empty):
+            ${JSONArray(context.take(3))}
+            Input JSON array:
             ${input}
         """.trimIndent()
 

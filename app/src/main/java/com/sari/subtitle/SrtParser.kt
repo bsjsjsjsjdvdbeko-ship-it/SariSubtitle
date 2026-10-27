@@ -185,6 +185,8 @@ object SrtParser {
         val start = parseTimestamp(startStr) ?: return null
         val end = parseTimestamp(endStr) ?: return null
 
+        // Invalid or reversed intervals can break subtitle timing and player seeking.
+        if (end <= start) return null
         return Pair(start, end)
     }
 
@@ -192,21 +194,25 @@ object SrtParser {
      * يحلّل "00:00:01,000" أو "00:00:01.000".
      */
     private fun parseTimestamp(s: String): Long? {
-        // قد يحتوي على معلومات إضافية بعد المسافة
-        val clean = s.takeWhile { !it.isWhitespace() }
-            .replace(',', '.')
-
-        val parts = clean.split(':')
-        if (parts.size < 3) return null
+        // Accept standard SRT timestamps and optional trailing WebVTT-style cue settings.
+        // Fractions are limited to 1-3 digits; malformed values are rejected, not coerced.
+        val clean = s.trim().takeWhile { !it.isWhitespace() }
+        val match = Regex("^(\\d{1,}):([0-5]\\d):([0-5]\\d)(?:[,.](\\d{1,3}))?$").matchEntire(clean)
+            ?: return null
 
         return try {
-            val h = parts[0].toLongOrNull() ?: 0
-            val m = parts[1].toLongOrNull() ?: 0
-            val sec = parts[2].toDoubleOrNull() ?: return null
+            val hours = match.groupValues[1].toLongOrNull() ?: return null
+            val minutes = match.groupValues[2].toLongOrNull() ?: return null
+            val seconds = match.groupValues[3].toLongOrNull() ?: return null
+            val fraction = match.groupValues[4]
+            val millis = if (fraction.isEmpty()) 0L else fraction.padEnd(3, '0').toLongOrNull() ?: return null
 
-            val ms = ((h * 3600 + m * 60) * 1000) + (sec * 1000).toLong()
-            ms
-        } catch (_: Exception) {
+            val totalSeconds = Math.addExact(
+                Math.addExact(Math.multiplyExact(hours, 3600L), Math.multiplyExact(minutes, 60L)),
+                seconds
+            )
+            Math.addExact(Math.multiplyExact(totalSeconds, 1000L), millis)
+        } catch (_: ArithmeticException) {
             null
         }
     }

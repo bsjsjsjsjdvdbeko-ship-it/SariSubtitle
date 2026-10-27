@@ -288,7 +288,41 @@ object SrtTranslationService {
             var batchResults: List<String>? = null
             var batchProvider = "none"
             val providerFailures = mutableListOf<String>()
-            val omniFirst = settings?.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE
+            val configuredTranslationProviders = listOf(ProviderConnectionTester.OMNIROUTE, ProviderConnectionTester.GEMINI)
+            val adaptiveProfile = context?.let { AdaptiveContextStore.get(it) }
+            val adaptiveSnapshot = context?.let {
+                AdaptiveRoutingEngine.snapshot(
+                    context = it,
+                    task = ProviderScoringEngine.Task.TRANSLATION,
+                    sourceLanguage = sourceLang,
+                    audioDurationMs = null,
+                    chunkDurationMs = adaptiveProfile?.typicalChunkDurationMs,
+                    speechSpeedWpm = null
+                )
+            }
+            val routedTranslation = if (settings != null) {
+                ProviderRoutingEngine.choose(
+                    context!!,
+                    configuredTranslationProviders,
+                    configured = { provider -> when (provider) {
+                        ProviderConnectionTester.OMNIROUTE -> settings.omniRouteEnabled || settings.hasOmniRouteApiKey() || settings.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE
+                        ProviderConnectionTester.GEMINI -> settings.hasGeminiApiKey()
+                        else -> false
+                    } },
+                    forceProvider = when (settings.translationProvider) {
+                        SubtitleSettings.TRANSLATION_OMNIROUTE -> ProviderConnectionTester.OMNIROUTE
+                        SubtitleSettings.TRANSLATION_GEMINI -> ProviderConnectionTester.GEMINI
+                        else -> null
+                    },
+                    task = ProviderScoringEngine.Task.TRANSLATION,
+                    adaptiveContext = adaptiveSnapshot
+                ).map { it.id }
+            } else emptyList()
+            val omniFirst = routedTranslation.firstOrNull() == ProviderConnectionTester.OMNIROUTE
+            if (context != null) {
+                omniRouteAvailable = omniRouteAvailable && ProviderRoutingEngine.isUsable(context, ProviderConnectionTester.OMNIROUTE)
+                geminiAvailable = geminiAvailable && ProviderRoutingEngine.isUsable(context, ProviderConnectionTester.GEMINI)
+            }
 
             // A provider is only marked successful after its response has been validated here,
             // even if its client also performs validation internally.
@@ -319,6 +353,8 @@ object SrtTranslationService {
                 logAttempt("OmniRoute", model, attemptStarted, "قيد التنفيذ", "${batchTexts.size} نص", "جارٍ الاتصال بخادم OmniRoute")
                 return try {
                     val result = validateBatch("OmniRoute", OmniRouteTranslationClient(settings).translateBatch(batchTexts, sourceLang, targetLang))
+                    ProviderRoutingEngine.recordSuccess(context!!, ProviderConnectionTester.OMNIROUTE,
+                        (android.os.SystemClock.elapsedRealtime() - attemptStarted).coerceAtLeast(0L), "نجح طلب الترجمة الفعلي")
                     batchProvider = "OmniRoute"
                     logAttempt("OmniRoute", model, attemptStarted, "نجاح", "${result.size}/${batchTexts.size} ترجمة صالحة", "$sourceLang→$targetLang; تم التحقق من الرد")
                     result
@@ -326,6 +362,8 @@ object SrtTranslationService {
                     if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
                     val reason = (e.message ?: e.javaClass.simpleName).take(350)
                     providerFailures += "OmniRoute: $reason"
+                    ProviderRoutingEngine.recordFailure(context!!, ProviderConnectionTester.OMNIROUTE, e,
+                        (android.os.SystemClock.elapsedRealtime() - attemptStarted).coerceAtLeast(0L))
                     Log.e(TAG, "OmniRoute batch failed; configured route will continue to next text provider. source=$sourceLang target=$targetLang batchSize=${batchTexts.size} reason=$reason", e)
                     logAttempt("OmniRoute", model, attemptStarted, "فشل", "لم تُقبل أي نتيجة", reason)
                     omniRouteAvailable = false
@@ -341,6 +379,8 @@ object SrtTranslationService {
                 logAttempt("Gemini", model, attemptStarted, "قيد التنفيذ", "${batchTexts.size} نص", "جارٍ طلب الترجمة")
                 return try {
                     val result = validateBatch("Gemini", GeminiTranslationService.translateBatch(batchTexts, sourceLang, targetLang, geminiKey))
+                    ProviderRoutingEngine.recordSuccess(context!!, ProviderConnectionTester.GEMINI,
+                        (android.os.SystemClock.elapsedRealtime() - attemptStarted).coerceAtLeast(0L), "نجح طلب الترجمة الفعلي")
                     batchProvider = "Gemini"
                     logAttempt("Gemini", model, attemptStarted, "نجاح", "${result.size}/${batchTexts.size} ترجمة صالحة", "$sourceLang→$targetLang; تم التحقق من الرد")
                     result
@@ -357,6 +397,8 @@ object SrtTranslationService {
                         "Gemini فشل؛ جاري استخدام المزود التالي. السبب: $rawReason"
                     }.take(700)
                     providerFailures += reason
+                    ProviderRoutingEngine.recordFailure(context!!, ProviderConnectionTester.GEMINI, e,
+                        (android.os.SystemClock.elapsedRealtime() - attemptStarted).coerceAtLeast(0L))
                     Log.e(TAG, "Gemini translation batch failed; configured route will continue to next text provider. source=$sourceLang target=$targetLang batchSize=${batchTexts.size} model=$model reason=$reason", e)
                     logAttempt("Gemini", model, attemptStarted, "فشل", "لم تُقبل أي نتيجة", reason)
                     geminiAvailable = false
@@ -365,7 +407,7 @@ object SrtTranslationService {
             }
             // One source of truth for automatic and manually selected SRT translation.
             // Vosk is STT, not a text-translation fallback; it is never called from this route.
-            Log.i(TAG, "Translation route=${if (omniFirst) "OmniRoute->Gemini" else if (omniRouteAvailable) "Gemini->OmniRoute" else "Gemini->text-fallbacks"} source=$sourceLang target=$targetLang cues=${batch.size}")
+            Log.i(TAG, "Translation route=${if (omniFirst) "OmniRoute->Gemini" else if (omniRouteAvailable) "Gemini->OmniRoute" else "Gemini->text-fallbacks"} ranked=${routedTranslation.joinToString("->")} source=$sourceLang target=$targetLang cues=${batch.size}")
             if (omniFirst) {
                 batchResults = tryOmniRoute() ?: tryGemini()
             } else {
@@ -475,6 +517,18 @@ object SrtTranslationService {
             context.getSharedPreferences("srt_translation_cache_v2", Context.MODE_PRIVATE)
                 .edit().putString(key, value).apply()
         } catch (_: Exception) { /* Cache failures must not fail translation. */ }
+    }
+
+    /** Stage 43: text-only single-cue translation used by the live pipeline. */
+    fun translateLiveText(
+        text: String,
+        sourceLang: String,
+        targetLang: String = "ar",
+        context: Context? = null,
+        shouldCancel: () -> Boolean = { false }
+    ): String {
+        val settings = context?.let { SubtitleSettings(it) }
+        return translateText(text, sourceLang, targetLang, settings, shouldCancel, context)
     }
 
     private fun translateText(

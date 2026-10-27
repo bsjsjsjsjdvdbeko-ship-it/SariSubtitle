@@ -11,7 +11,12 @@ import java.net.URL
 
 /** Text-only OmniRoute gateway client. It never receives audio or SRT timestamps. */
 class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
-    fun translateBatch(texts: List<String>, sourceLang: String, targetLang: String): List<String> {
+    fun translateBatch(
+        texts: List<String>,
+        sourceLang: String,
+        targetLang: String,
+        context: List<String> = emptyList()
+    ): List<String> {
         require(texts.isNotEmpty() && texts.size <= 8) { "حجم دفعة OmniRoute غير صالح." }
         val input = JSONArray().apply { texts.forEach { put(it) } }
         val prompt = """
@@ -20,7 +25,12 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
             tone, and subtitle brevity. Do not add explanations, numbering, markdown, or extra text.
             Return ONLY a JSON object with exactly one property named "translations", whose value
             is an array of strings in the same order and exactly the same length as the input array.
-            Do not merge items. Input JSON array:
+            Do not merge items. Use the optional recent conversation context only to resolve
+            pronouns, names, omitted subjects, and terminology. Never translate or repeat the
+            context itself; return only the translations for the current input array.
+            Recent context (may be empty):
+            ${JSONArray(context.take(3))}
+            Input JSON array:
             $input
         """.trimIndent()
         val payload = JSONObject()
