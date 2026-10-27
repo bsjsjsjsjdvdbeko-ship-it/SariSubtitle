@@ -4,6 +4,7 @@
         <item name="android:fontFamily">sans</item>
         <item name="android:windowBackground">@color/sari_background</item>
         <item name="android:colorBackground">@color/sari_surface</item>
+        <item name="colorBackground">@color/sari_surface</item>
         <item name="android:textColorPrimary">@color/sari_text_primary</item>
         <item name="android:textColorSecondary">@color/sari_text_muted</item>
         <item name="android:windowLightNavigationBar">false</item>

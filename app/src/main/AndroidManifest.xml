@@ -20,6 +20,7 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.SariSubtitle">
 
+        <activity android:name="com.sari.subtitle.OperationHistoryActivity" android:exported="false" />
         <activity android:name="com.sari.subtitle.LocalMediaPlayerActivity" android:exported="false" android:screenOrientation="sensor" />
 
         <activity

@@ -1,7 +1,5 @@
 package com.sari.subtitle
 
-import com.sari.subtitle.v2.R
-
 import android.app.Activity
 import android.net.Uri
 import android.os.Bundle

@@ -11,16 +11,16 @@
         android:id="@+id/webView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_above="@+id/bottomBar"
-        android:layout_below="@id/operationLogPanel" />
+        android:layout_above="@id/bottomBar"
+        android:layout_below="@id/topBar" />
 
     <!-- SubtitleOverlay فوق WebView -->
     <FrameLayout
         android:id="@+id/webContainer"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_above="@+id/bottomBar"
-        android:layout_below="@id/operationLogPanel">
+        android:layout_above="@id/bottomBar"
+        android:layout_below="@id/topBar">
 
         <com.sari.subtitle.SubtitleOverlay
             android:id="@+id/subtitleOverlay"
@@ -110,23 +110,25 @@
         android:id="@+id/operationLogPanel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_below="@+id/topBar"
-        android:layout_above="@+id/bottomBar"
+        android:layout_above="@id/bottomBar"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:paddingStart="12dp"
         android:paddingEnd="8dp"
-        android:paddingTop="7dp"
-        android:paddingBottom="7dp"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
         android:layout_marginStart="10dp"
         android:layout_marginEnd="10dp"
-        android:layout_marginTop="8dp"
+        android:layout_marginBottom="4dp"
+        android:visibility="gone"
         android:background="@drawable/bg_sari_panel">
         <TextView
             android:id="@+id/operationLogText"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:singleLine="true"
+            android:ellipsize="end"
             android:text="@string/operation_log_ready"
             android:textColor="@color/sari_text_primary"
             android:textSize="11sp"
@@ -136,8 +138,11 @@
             android:id="@+id/operationLogButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:minHeight="40dp"
-            android:textSize="11sp"
+            android:minHeight="32dp"
+            android:minWidth="64dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:textSize="10sp"
             android:text="@string/btn_history"
             android:background="@drawable/bg_sari_button_secondary"
             android:textColor="@color/sari_text_primary" />
@@ -218,6 +223,20 @@
                 android:background="@drawable/bg_sari_button_secondary"
                 android:textColor="@color/sari_text_primary"
                 android:contentDescription="@string/desc_export_dubbing" />
+
+            <Button
+                android:textAllCaps="false"
+                android:id="@+id/operationLogToggleButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.65"
+                android:minHeight="46dp"
+                android:layout_marginHorizontal="3dp"
+                android:textSize="10sp"
+                android:text="@string/btn_history"
+                android:background="@drawable/bg_sari_button_secondary"
+                android:textColor="@color/sari_text_primary"
+                android:contentDescription="@string/btn_history" />
 
             <Button
                 android:textAllCaps="false"

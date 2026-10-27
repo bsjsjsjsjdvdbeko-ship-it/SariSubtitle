@@ -64,6 +64,7 @@ class SariSubtitleActivity : AppCompatActivity() {
     private lateinit var urlInput: EditText
     private lateinit var statusText: TextView
     private lateinit var operationLogText: TextView
+    private lateinit var operationLogPanel: LinearLayout
     private lateinit var webView: WebView
     private lateinit var subtitleOverlay: SubtitleOverlay
 
@@ -72,6 +73,12 @@ class SariSubtitleActivity : AppCompatActivity() {
     private lateinit var storage: SrtStorage
 
     private val handler = Handler(Looper.getMainLooper())
+    private val hideOperationLogRunnable = Runnable {
+        if (::operationLogPanel.isInitialized && !isFinishing) {
+            operationLogPanel.visibility = android.view.View.GONE
+            updatePlaybackAreaForLogPanel()
+        }
+    }
     private val repo = SubtitleRepository()
     private var polling = false
     /** Last video-like WebView URL observed by the main-thread poller (covers SPA pushState navigation). */
@@ -122,11 +129,18 @@ class SariSubtitleActivity : AppCompatActivity() {
         urlInput = findViewById(R.id.urlInput)
         statusText = findViewById(R.id.statusText)
         operationLogText = findViewById(R.id.operationLogText)
+        operationLogPanel = findViewById(R.id.operationLogPanel)
         OperationLogStore.onChanged = { runOnUiThread { if (!isFinishing) refreshOperationLogPanel() } }
-        findViewById<Button>(R.id.operationLogButton).setOnClickListener { OperationLogStore.showHistory(this) }
+        findViewById<Button>(R.id.operationLogButton).setOnClickListener {
+            startActivity(Intent(this, OperationHistoryActivity::class.java))
+        }
+        findViewById<Button>(R.id.operationLogToggleButton).setOnClickListener {
+            startActivity(Intent(this, OperationHistoryActivity::class.java))
+        }
         refreshOperationLogPanel()
         webView = findViewById(R.id.webView)
         subtitleOverlay = findViewById(R.id.subtitleOverlay)
+        updatePlaybackAreaForLogPanel()
 
         subtitleOverlay.applySettings(settings)
 
@@ -3094,6 +3108,31 @@ private fun openAudioPicker() {
             "${display.operation} · ${display.status} · ${display.provider}/${display.model} · ${display.durationMs}ms" +
                 (if (display.result.isNotBlank()) " · ${display.result}" else "") +
                 (if (display.detail.isNotBlank()) " · ${display.detail}" else "")
+        showCompactOperationLog()
+    }
+
+    /** Show a one-line summary for 4.5 seconds and reserve space instead of covering video. */
+    private fun showCompactOperationLog() {
+        if (!::operationLogPanel.isInitialized || isFinishing) return
+        handler.removeCallbacks(hideOperationLogRunnable)
+        operationLogPanel.visibility = android.view.View.VISIBLE
+        updatePlaybackAreaForLogPanel()
+        handler.postDelayed(hideOperationLogRunnable, 4_500L)
+    }
+
+    private fun updatePlaybackAreaForLogPanel() {
+        if (!::webView.isInitialized) return
+        val showLog = ::operationLogPanel.isInitialized && operationLogPanel.visibility == android.view.View.VISIBLE
+        fun update(view: android.view.View) {
+            val params = view.layoutParams as? android.widget.RelativeLayout.LayoutParams ?: return
+            params.removeRule(android.widget.RelativeLayout.ABOVE)
+            params.addRule(android.widget.RelativeLayout.ABOVE, if (showLog) R.id.operationLogPanel else R.id.bottomBar)
+            params.removeRule(android.widget.RelativeLayout.BELOW)
+            params.addRule(android.widget.RelativeLayout.BELOW, R.id.topBar)
+            view.layoutParams = params
+        }
+        update(webView)
+        update(findViewById(R.id.webContainer))
     }
 
     /** Updates the visible status area from workflows that restore saved subtitles. */
@@ -3169,6 +3208,8 @@ private fun openAudioPicker() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(hideOperationLogRunnable)
+        OperationLogStore.onChanged = null
         activeOperationCancellation?.cancel()
         try { textToSpeech?.stop(); textToSpeech?.shutdown() } catch (_: Exception) {}
         textToSpeech = null
