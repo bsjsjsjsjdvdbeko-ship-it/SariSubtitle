@@ -52,7 +52,7 @@ class OperationHistoryActivity : AppCompatActivity() {
             setPadding(0, 12, 0, 0)
         }
         actions.addView(Button(this).apply {
-            text = if (english) "Copy" else "نسخ السجل"
+            this.text = if (english) "Copy" else "نسخ السجل"
             setOnClickListener {
                 val all = OperationLogStore.events(this@OperationHistoryActivity)
                     .joinToString("\n\n") { OperationLogStore.format(it) }
@@ -63,7 +63,7 @@ class OperationHistoryActivity : AppCompatActivity() {
             }
         }, LinearLayout.LayoutParams(0, -2, 1f))
         actions.addView(Button(this).apply {
-            text = if (english) "Clear" else "مسح السجل"
+            this.text = if (english) "Clear" else "مسح السجل"
             setOnClickListener {
                 AlertDialog.Builder(this@OperationHistoryActivity)
                     .setTitle(if (english) "Clear history?" else "مسح السجل؟")
@@ -75,7 +75,7 @@ class OperationHistoryActivity : AppCompatActivity() {
             }
         }, LinearLayout.LayoutParams(0, -2, 1f))
         actions.addView(Button(this).apply {
-            text = if (english) "Back" else "رجوع"
+            this.text = if (english) "Back" else "رجوع"
             setOnClickListener { finish() }
         }, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(actions)

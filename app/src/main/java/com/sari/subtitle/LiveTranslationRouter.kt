@@ -51,7 +51,6 @@ class LiveTranslationRouter(private val context: Context) {
             chunkDurationMs = adaptive.typicalChunkDurationMs,
             speechSpeedWpm = adaptive.speechSpeedWpm
         )
-        val configured = listOf(ProviderConnectionTester.OMNIROUTE, ProviderConnectionTester.GEMINI)
         val configuredFn: (String) -> Boolean = { id -> when (id) {
             ProviderConnectionTester.OMNIROUTE -> settings.omniRouteEnabled || settings.hasOmniRouteApiKey() || settings.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE
             ProviderConnectionTester.GEMINI -> settings.hasGeminiApiKey()
@@ -115,8 +114,10 @@ class LiveTranslationRouter(private val context: Context) {
                 (android.os.SystemClock.elapsedRealtime() - started).coerceAtLeast(0L)
             )
         } catch (fallback: Throwable) {
-            last = fallback
-            throw IllegalStateException("تعذر ترجمة المقطع المباشر: ${last.message ?: last.javaClass.simpleName}", last)
+            throw IllegalStateException(
+                "تعذر ترجمة المقطع المباشر: ${fallback.message ?: fallback.javaClass.simpleName}",
+                fallback
+            )
         }
     }
 

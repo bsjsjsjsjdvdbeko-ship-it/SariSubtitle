@@ -457,7 +457,7 @@ class SettingsCenterActivity : AppCompatActivity() {
     private fun addButtonRow(card: LinearLayout, title: String, subtitle: String, action: () -> Unit) {
         val button = Button(this).apply {
             text = "$title  ›"
-            textAllCaps = false
+            setAllCaps(false)
             textSize = 12f
             setTextColor(Color.WHITE)
             background = rounded(Color.rgb(48, 59, 90), 12f)
