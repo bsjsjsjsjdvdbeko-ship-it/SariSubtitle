@@ -4,6 +4,7 @@ import android.os.SystemClock
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okio.ByteString
+import okio.ByteString.Companion.toByteString
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -89,7 +90,7 @@ class DeepgramStreamingSttSession(
         if (closed.get() || failed.get()) return false
         val safeLength = length.coerceIn(0, pcm.size)
         if (safeLength <= 0) return false
-        return socket?.send(ByteString.of(pcm, 0, safeLength)) == true
+        return socket?.send(pcm.toByteString(0, safeLength)) == true
     }
 
     @Synchronized
