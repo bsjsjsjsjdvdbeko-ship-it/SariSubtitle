@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.TextView
@@ -21,6 +22,14 @@ class SubtitleOverlay @JvmOverloads constructor(
 ) : FrameLayout(context, attrs, defStyleAttr) {
 
     private val textView: TextView
+    private val subtitleSettings = SubtitleSettings(context.applicationContext)
+
+    private var dragging = false
+    private var downRawX = 0f
+    private var downRawY = 0f
+    private var downViewX = 0f
+    private var downViewY = 0f
+    private var dragTouchSlop = 0f
 
     init {
         isClickable = false
@@ -36,10 +45,12 @@ class SubtitleOverlay @JvmOverloads constructor(
             setShadowLayer(6f, 0f, 2f, Color.BLACK)
             text = "Sari Subtitle"
             visibility = View.GONE
+            isClickable = true
+            isFocusable = false
         }
 
         val lp = LayoutParams(
-            LayoutParams.MATCH_PARENT,
+            LayoutParams.WRAP_CONTENT,
             LayoutParams.WRAP_CONTENT
         ).apply {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
@@ -49,6 +60,71 @@ class SubtitleOverlay @JvmOverloads constructor(
         }
 
         addView(textView, lp)
+        dragTouchSlop = context.resources.displayMetrics.density * 8f
+        textView.setOnTouchListener { view, event -> handleDragTouch(view, event) }
+    }
+
+    private fun handleDragTouch(view: View, event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                dragging = false
+                downRawX = event.rawX
+                downRawY = event.rawY
+                downViewX = view.x
+                downViewY = view.y
+                parent?.requestDisallowInterceptTouchEvent(true)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.rawX - downRawX
+                val dy = event.rawY - downRawY
+                if (!dragging && (kotlin.math.abs(dx) > dragTouchSlop || kotlin.math.abs(dy) > dragTouchSlop)) {
+                    dragging = true
+                }
+                if (dragging) {
+                    moveSubtitleTo(downViewX + dx, downViewY + dy)
+                }
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (dragging) {
+                    persistCurrentPosition()
+                }
+                parent?.requestDisallowInterceptTouchEvent(false)
+                dragging = false
+                return true
+            }
+        }
+        return true
+    }
+
+    private fun moveSubtitleTo(rawX: Float, rawY: Float) {
+        val maxX = (width - textView.width - paddingLeft - paddingRight).coerceAtLeast(0)
+        val maxY = (height - textView.height - paddingTop - paddingBottom).coerceAtLeast(0)
+        val clampedX = rawX.coerceIn(paddingLeft.toFloat(), (paddingLeft + maxX).toFloat())
+        val clampedY = rawY.coerceIn(paddingTop.toFloat(), (paddingTop + maxY).toFloat())
+        textView.x = clampedX
+        textView.y = clampedY
+    }
+
+    private fun persistCurrentPosition() {
+        val maxX = (width - textView.width - paddingLeft - paddingRight).coerceAtLeast(1)
+        val maxY = (height - textView.height - paddingTop - paddingBottom).coerceAtLeast(1)
+        subtitleSettings.subtitleDragX = ((textView.x - paddingLeft) / maxX).coerceIn(0f, 1f)
+        subtitleSettings.subtitleDragY = ((textView.y - paddingTop) / maxY).coerceIn(0f, 1f)
+        subtitleSettings.hasCustomSubtitlePosition = true
+    }
+
+    private fun restoreSavedPosition(settings: SubtitleSettings) {
+        if (!settings.hasCustomSubtitlePosition) return
+        post {
+            if (width <= 0 || height <= 0 || textView.width <= 0 || textView.height <= 0) return@post
+            val maxX = (width - textView.width - paddingLeft - paddingRight).coerceAtLeast(0)
+            val maxY = (height - textView.height - paddingTop - paddingBottom).coerceAtLeast(0)
+            val x = paddingLeft + (maxX * settings.subtitleDragX)
+            val y = paddingTop + (maxY * settings.subtitleDragY)
+            moveSubtitleTo(x, y, persist = false)
+        }
     }
 
     /**
@@ -75,26 +151,53 @@ class SubtitleOverlay @JvmOverloads constructor(
         val shadowRadius = if (settings.bgColor == Color.TRANSPARENT) 10f else 4f
         textView.setShadowLayer(shadowRadius, 0f, 2f, Color.BLACK)
 
-        // الموضع
+        // الموضع: إذا سحب المستخدم الترجمة، استخدم الموضع المحفوظ؛ وإلا الوضع التقليدي.
         val lp = textView.layoutParams as LayoutParams
-        when (settings.position) {
-            SubtitleSettings.POS_TOP -> {
-                lp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                lp.topMargin = 70
-                lp.bottomMargin = 0
-            }
-            SubtitleSettings.POS_CENTER -> {
-                lp.gravity = Gravity.CENTER
-                lp.topMargin = 0
-                lp.bottomMargin = 0
-            }
-            else -> {
-                lp.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                lp.topMargin = 0
-                lp.bottomMargin = 70
+        if (settings.hasCustomSubtitlePosition) {
+            lp.gravity = Gravity.TOP or Gravity.LEFT
+            lp.topMargin = 0
+            lp.bottomMargin = 0
+            lp.leftMargin = 0
+            lp.rightMargin = 0
+        } else {
+            when (settings.position) {
+                SubtitleSettings.POS_TOP -> {
+                    lp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    lp.topMargin = 70
+                    lp.bottomMargin = 0
+                    lp.leftMargin = 20
+                    lp.rightMargin = 20
+                }
+                SubtitleSettings.POS_CENTER -> {
+                    lp.gravity = Gravity.CENTER
+                    lp.topMargin = 0
+                    lp.bottomMargin = 0
+                    lp.leftMargin = 20
+                    lp.rightMargin = 20
+                }
+                else -> {
+                    lp.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                    lp.topMargin = 0
+                    lp.bottomMargin = 70
+                    lp.leftMargin = 20
+                    lp.rightMargin = 20
+                }
             }
         }
         textView.layoutParams = lp
+        restoreSavedPosition(settings)
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (w > 0 && h > 0 && subtitleSettings.hasCustomSubtitlePosition) {
+            restoreSavedPosition(subtitleSettings)
+        }
+    }
+
+    fun resetSubtitlePosition() {
+        subtitleSettings.resetSubtitlePosition()
+        applySettings(subtitleSettings)
     }
 
     fun show(text: String) {

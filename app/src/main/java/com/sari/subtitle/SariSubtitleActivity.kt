@@ -70,6 +70,7 @@ class SariSubtitleActivity : AppCompatActivity() {
         private const val REQ_SAVE_TRANSLATED_SRT = 1003
         private const val OFFSET_STEP_MS = 500L
         private const val PREF_LAST_CACHED_VIDEO_URL = "last_cached_video_url"
+        private const val RESUME_MIN_MS = 5_000L
         private const val REQ_LIVE_AUDIO_PERMISSION = 4101
         private const val REQ_LIVE_MEDIA_PROJECTION = 4102
     }
@@ -84,6 +85,7 @@ class SariSubtitleActivity : AppCompatActivity() {
     private lateinit var settings: SubtitleSettings
     private var pendingWhisperSrt: String? = null
     private lateinit var storage: SrtStorage
+    private lateinit var playbackStore: PlaybackPositionStore
 
     private val handler = Handler(Looper.getMainLooper())
     private val hideOperationLogRunnable = Runnable {
@@ -117,6 +119,14 @@ class SariSubtitleActivity : AppCompatActivity() {
     /** URL requested by the one-tap workflow; capture begins after WebView loads it. */
     private var pendingAutoCaptureUrl: String? = null
 
+    private var activePlaybackKey: String? = null
+    private var pendingResumePositionMs = 0L
+    private var resumePromptShownForKey: String? = null
+    private var resumeAppliedForKey: String? = null
+    private var lastPlaybackPositionMs = 0L
+    private var lastPlaybackDurationMs = 0L
+    private var lastPlaybackSaveAtMs = 0L
+
     private var liveReceiverRegistered = false
     private var lastLiveSessionId = Long.MIN_VALUE
     private var lastLiveSequence = Long.MIN_VALUE
@@ -138,6 +148,7 @@ class SariSubtitleActivity : AppCompatActivity() {
 
         settings = SubtitleSettings(this)
         storage = SrtStorage(this)
+        playbackStore = PlaybackPositionStore(this)
         repo.offsetMs = settings.offsetMs
         textToSpeech = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -191,7 +202,10 @@ class SariSubtitleActivity : AppCompatActivity() {
                 super.onPageFinished(view, url)
                 injectAutoShow()
                 // ⚡ محاولة استرجاع SRT لهذا URL
-                if (url != null) tryAutoLoadSrt(url)
+                if (url != null) {
+                    tryAutoLoadSrt(url)
+                    preparePlaybackResume(url)
+                }
                 val pending = pendingAutoCaptureUrl
                 if (!pending.isNullOrBlank() && !url.isNullOrBlank() && sameVideoUrl(pending, url)) {
                     pendingAutoCaptureUrl = null
@@ -2924,6 +2938,79 @@ private fun openAudioPicker() {
         if (previous != null && sameVideoUrl(previous, current)) return
         lastObservedVideoUrl = current
         tryAutoLoadSrt(current)
+        preparePlaybackResume(current)
+    }
+
+    private fun preparePlaybackResume(source: String) {
+        if (!::playbackStore.isInitialized || !isVideoLikeUrl(source)) return
+        val key = playbackStore.keyFor(source) ?: return
+        if (activePlaybackKey == key) return
+        activePlaybackKey = key
+        pendingResumePositionMs = playbackStore.getByKey(key)?.positionMs ?: 0L
+        resumePromptShownForKey = null
+        resumeAppliedForKey = null
+        lastPlaybackPositionMs = 0L
+        lastPlaybackDurationMs = 0L
+        lastPlaybackSaveAtMs = 0L
+    }
+
+    private fun maybeOfferWebResume(durationMs: Long) {
+        val key = activePlaybackKey ?: return
+        if (resumeAppliedForKey == key || resumePromptShownForKey == key) return
+        val saved = pendingResumePositionMs
+        if (saved < RESUME_MIN_MS) {
+            resumeAppliedForKey = key
+            return
+        }
+        if (durationMs > 0L && saved >= (durationMs - RESUME_MIN_MS).coerceAtLeast(0L)) {
+            playbackStore.clearByKey(key)
+            pendingResumePositionMs = 0L
+            resumeAppliedForKey = key
+            return
+        }
+        resumePromptShownForKey = key
+        val label = formatSec(saved / 1000.0)
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("استئناف التشغيل")
+            .setMessage("تم حفظ هذا الفيديو عند $label. هل تريد المتابعة من الموضع المحفوظ؟")
+            .setNegativeButton("بدء من البداية") { _, _ ->
+                playbackStore.clearByKey(key)
+                pendingResumePositionMs = 0L
+                resumeAppliedForKey = key
+                seekWebVideoTo(0L)
+            }
+            .setPositiveButton("استئناف") { _, _ ->
+                resumeAppliedForKey = key
+                seekWebVideoTo(saved)
+            }
+            .setOnCancelListener {
+                resumeAppliedForKey = key
+            }
+            .show()
+    }
+
+    private fun seekWebVideoTo(positionMs: Long) {
+        val targetSeconds = (positionMs.coerceAtLeast(0L) / 1000.0).toString()
+        val js = """
+            (function() {
+              try {
+                var vids = Array.from(document.querySelectorAll('video'));
+                var best = vids.find(function(v) { return v && v.readyState >= 1 && v.duration > 0; }) || vids[0];
+                if (best) { best.currentTime = $targetSeconds; return true; }
+              } catch(e) {}
+              return false;
+            })();
+        """.trimIndent()
+        webView.evaluateJavascript(js, null)
+        pollCurrentTimeOnce()
+    }
+
+    private fun saveCurrentPlaybackPosition() {
+        if (!::playbackStore.isInitialized) return
+        val key = activePlaybackKey ?: return
+        if (lastPlaybackPositionMs < RESUME_MIN_MS || lastPlaybackDurationMs <= 0L) return
+        playbackStore.saveByKey(key, lastPlaybackPositionMs, lastPlaybackDurationMs)
+        lastPlaybackSaveAtMs = System.currentTimeMillis()
     }
 
     private fun rememberCachedVideoUrl(url: String) {
@@ -3024,8 +3111,20 @@ private fun openAudioPicker() {
             val d = o.optDouble("duration", 0.0)
             val p = o.optBoolean("paused", false)
             val r = o.optInt("readyState", 0)
+            val currentMs = (t.coerceAtLeast(0.0) * 1000.0).toLong()
+            val durationMs = (d.coerceAtLeast(0.0) * 1000.0).toLong()
+            lastPlaybackPositionMs = currentMs
+            lastPlaybackDurationMs = durationMs
+            if (durationMs > 0L) maybeOfferWebResume(durationMs)
+            if (activePlaybackKey != null && durationMs > 0L &&
+                (System.currentTimeMillis() - lastPlaybackSaveAtMs >= 3_000L || p)) {
+                saveCurrentPlaybackPosition()
+            }
+            if (durationMs > 0L && currentMs >= (durationMs - RESUME_MIN_MS).coerceAtLeast(0L)) {
+                activePlaybackKey?.let(playbackStore::clearByKey)
+            }
 
-            val cue = repo.findCueAt((t * 1000).toLong())
+            val cue = repo.findCueAt(currentMs)
 
             if (subtitlesVisible && overlayOn && !repo.isEmpty) {
                 if (cue != null) subtitleOverlay.show(cue.text) else subtitleOverlay.hide()
@@ -3608,7 +3707,21 @@ private fun openAudioPicker() {
         super.onBackPressed()
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::settings.isInitialized && ::subtitleOverlay.isInitialized) {
+            settings = SubtitleSettings(this)
+            subtitleOverlay.applySettings(settings)
+        }
+    }
+
+    override fun onPause() {
+        saveCurrentPlaybackPosition()
+        super.onPause()
+    }
+
     override fun onDestroy() {
+        saveCurrentPlaybackPosition()
         handler.removeCallbacks(hideOperationLogRunnable)
         handler.removeCallbacks(liveQueueTick)
         liveSubtitleQueue.clear()

@@ -305,6 +305,16 @@ object SettingsDialog {
         }
         root.addView(posRow)
         updateSizeButtons(posButtons, settings.position)
+        root.addView(Button(context).apply {
+            text = "إعادة تعيين موضع الترجمة"
+            isAllCaps = false
+            textSize = 12f
+            setOnClickListener {
+                settings.resetSubtitlePosition()
+                updateSizeButtons(posButtons, SubtitleSettings.POS_BOTTOM)
+                preview(settings, overlay)
+            }
+        })
 
         // لون النص
         root.addView(makeLabel(context, "لون النص"))

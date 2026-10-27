@@ -319,12 +319,23 @@ class SettingsCenterActivity : AppCompatActivity() {
         })
 
         card.addView(label("موضع الترجمة", 12f, Color.rgb(167, 176, 200)))
+        card.addView(infoValue(if (settings.hasCustomSubtitlePosition) {
+            "موضع مخصص محفوظ — اسحب الترجمة بإصبعك فوق الفيديو لتغييره."
+        } else {
+            "الموضع الافتراضي: أسفل الشاشة — ويمكنك سحب الترجمة مباشرة أثناء العرض."
+        }))
         val position = darkSpinner(SubtitleSettings.POSITION_LABELS, settings.position.coerceIn(0, 2))
         position.onItemSelectedListener = simpleItemListener { index ->
             settings.position = index
+            settings.hasCustomSubtitlePosition = false
             updatePreviewOnly()
         }
         card.addView(position)
+        addButtonRow(card, "إعادة تعيين موضع الترجمة", "إرجاعها إلى أسفل الشاشة في المنتصف") {
+            settings.resetSubtitlePosition()
+            Toast.makeText(this, "تمت إعادة موضع الترجمة إلى أسفل الشاشة", Toast.LENGTH_SHORT).show()
+            refreshUi()
+        }
 
         card.addView(label("لون النص", 12f, Color.rgb(167, 176, 200)))
         val textColor = darkSpinner(SubtitleSettings.TEXT_COLOR_LABELS, settings.textColorIndex.coerceIn(0, SubtitleSettings.TEXT_COLOR_LABELS.lastIndex))
@@ -371,7 +382,7 @@ class SettingsCenterActivity : AppCompatActivity() {
 
         addButtonRow(card, "استعادة مظهر الترجمة", "يعيد هذا القسم فقط إلى القيم الافتراضية") {
             settings.textSizeIndex = 2
-            settings.position = SubtitleSettings.POS_BOTTOM
+            settings.resetSubtitlePosition()
             settings.textColorIndex = 0
             settings.bgColorIndex = 0
             settings.bold = true

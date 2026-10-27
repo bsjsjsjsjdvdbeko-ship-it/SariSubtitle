@@ -13,6 +13,9 @@ class SubtitleSettings(context: Context) {
         private const val PREFS = "sari_subtitle_prefs"
         private const val KEY_TEXT_SIZE = "text_size"
         private const val KEY_POSITION = "position"
+        private const val KEY_DRAG_X = "subtitle_drag_x"
+        private const val KEY_DRAG_Y = "subtitle_drag_y"
+        private const val KEY_DRAG_CUSTOM = "subtitle_drag_custom"
         private const val KEY_TEXT_COLOR = "text_color"
         private const val KEY_BG_COLOR = "bg_color"
         private const val KEY_BOLD = "bold"
@@ -178,7 +181,32 @@ class SubtitleSettings(context: Context) {
 
     var position: Int
         get() = prefs.getInt(KEY_POSITION, POS_BOTTOM)
-        set(v) = prefs.edit().putInt(KEY_POSITION, v).apply()
+        set(v) = prefs.edit().putInt(KEY_POSITION, v.coerceIn(POS_BOTTOM, POS_TOP)).apply()
+
+    /**
+     * موضع الترجمة بالسحب، محفوظ كنسبة من مساحة SubtitleOverlay (0..1).
+     * استخدام النسبة يجعل الموضع ثابتاً نسبياً حتى مع اختلاف حجم الشاشة/Fullscreen.
+     */
+    var subtitleDragX: Float
+        get() = prefs.getFloat(KEY_DRAG_X, 0.5f).coerceIn(0f, 1f)
+        set(v) = prefs.edit().putFloat(KEY_DRAG_X, v.coerceIn(0f, 1f)).apply()
+
+    var subtitleDragY: Float
+        get() = prefs.getFloat(KEY_DRAG_Y, 0.88f).coerceIn(0f, 1f)
+        set(v) = prefs.edit().putFloat(KEY_DRAG_Y, v.coerceIn(0f, 1f)).apply()
+
+    var hasCustomSubtitlePosition: Boolean
+        get() = prefs.getBoolean(KEY_DRAG_CUSTOM, false)
+        set(v) = prefs.edit().putBoolean(KEY_DRAG_CUSTOM, v).apply()
+
+    fun resetSubtitlePosition() {
+        prefs.edit()
+            .putBoolean(KEY_DRAG_CUSTOM, false)
+            .putFloat(KEY_DRAG_X, 0.5f)
+            .putFloat(KEY_DRAG_Y, 0.88f)
+            .putInt(KEY_POSITION, POS_BOTTOM)
+            .apply()
+    }
 
     var textColorIndex: Int
         get() = prefs.getInt(KEY_TEXT_COLOR, 0)

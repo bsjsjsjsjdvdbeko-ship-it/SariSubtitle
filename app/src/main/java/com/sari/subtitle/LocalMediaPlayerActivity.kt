@@ -42,10 +42,16 @@ class LocalMediaPlayerActivity : Activity() {
     private var userSeeking = false
     private var subtitleSizeSp = 19f
     private var lastSubtitleText: String? = null
+    private lateinit var playbackStore: PlaybackPositionStore
+    private var playbackSourceKey: String? = null
+    private var resumePromptShown = false
+    private var resumeApplied = false
+    private var lastPlaybackSaveMs = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
+            playbackStore = PlaybackPositionStore(this)
             val uri = intent?.data
             if (uri == null || (uri.scheme != "content" && uri.scheme != "file")) {
                 showOpenError(getString(R.string.local_player_invalid_uri))
@@ -53,6 +59,7 @@ class LocalMediaPlayerActivity : Activity() {
             }
             val srt = intent.getStringExtra(EXTRA_SRT).orEmpty()
             cues = runCatching { SrtParser.parse(srt.byteInputStream(Charsets.UTF_8)) }.getOrDefault(emptyList())
+            playbackSourceKey = playbackStore.keyFor(uri.toString())
 
             val root = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -142,7 +149,10 @@ class LocalMediaPlayerActivity : Activity() {
                     prepared = true
                     mediaPlayer.isLooping = false
                     seekBar?.isEnabled = true
-                    player.start()
+                    maybeOfferResume(player, uri.toString())
+                    if (!resumeApplied) {
+                        player.start()
+                    }
                     startSubtitleTicker()
                 } catch (error: Exception) {
                     android.util.Log.e("SariMyFiles", "Player start failed", error)
@@ -150,6 +160,7 @@ class LocalMediaPlayerActivity : Activity() {
                 }
             }
             player.setOnCompletionListener {
+                playbackSourceKey?.let(playbackStore::clearByKey)
                 stopSubtitleTicker()
                 renderSubtitle(Long.MAX_VALUE)
                 updateTimeline()
@@ -177,6 +188,58 @@ class LocalMediaPlayerActivity : Activity() {
             android.util.Log.e("SariMyFiles", "Failed to initialize local media player", error)
             showOpenError(getString(R.string.local_player_init_failed))
         }
+    }
+
+    private fun maybeOfferResume(player: VideoView, source: String) {
+        if (resumePromptShown || resumeApplied) return
+        val record = playbackStore.get(source) ?: run {
+            resumeApplied = true
+            return
+        }
+        val duration = runCatching { player.duration.toLong() }.getOrDefault(0L)
+        val position = record.positionMs
+        if (position < 5_000L || (duration > 0L && position >= duration - 5_000L)) {
+            playbackStore.clear(source)
+            resumeApplied = true
+            return
+        }
+        resumePromptShown = true
+        val message = "آخر مشاهدة: ${formatTime(position.toInt())}"
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("استئناف التشغيل")
+            .setMessage("تم حفظ موضع هذا الفيديو عند $message. هل تريد المتابعة من هناك؟")
+            .setNegativeButton("بدء من البداية") { _, _ ->
+                playbackStore.clear(source)
+                resumeApplied = true
+                runCatching { player.seekTo(0) }
+                player.start()
+                renderSubtitle(0L)
+                updateTimeline(0)
+                startSubtitleTicker()
+            }
+            .setPositiveButton("استئناف") { _, _ ->
+                resumeApplied = true
+                val target = if (duration > 0L) position.coerceIn(0L, (duration - 1000L).coerceAtLeast(0L)) else position
+                runCatching { player.seekTo(target.toInt()) }
+                renderSubtitle(target)
+                updateTimeline(target.toInt())
+                player.start()
+                startSubtitleTicker()
+            }
+            .setOnCancelListener {
+                resumeApplied = true
+                player.start()
+                startSubtitleTicker()
+            }
+            .show()
+    }
+
+    private fun savePlaybackPosition() {
+        if (!::playbackStore.isInitialized) return
+        val sourceKey = playbackSourceKey ?: return
+        val position = runCatching { video?.currentPosition?.toLong() ?: 0L }.getOrDefault(0L)
+        val duration = runCatching { video?.duration?.toLong() ?: 0L }.getOrDefault(0L)
+        playbackStore.saveByKey(sourceKey, position, duration)
     }
 
     private fun controlButton(label: String, action: () -> Unit) = Button(this).apply {
@@ -243,6 +306,11 @@ class LocalMediaPlayerActivity : Activity() {
                     val position = v.currentPosition.coerceAtLeast(0)
                     renderSubtitle(position.toLong())
                     updateTimeline(position)
+                    val now = System.currentTimeMillis()
+                    if (now - lastPlaybackSaveMs >= 3_000L) {
+                        savePlaybackPosition()
+                        lastPlaybackSaveMs = now
+                    }
                 } catch (error: Exception) {
                     android.util.Log.w("SariMyFiles", "Subtitle sync tick failed", error)
                 }
@@ -302,6 +370,7 @@ class LocalMediaPlayerActivity : Activity() {
     }
 
     override fun onPause() {
+        savePlaybackPosition()
         try {
             if (video?.isPlaying == true) video?.pause()
         } catch (_: Exception) {}
@@ -315,6 +384,7 @@ class LocalMediaPlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        savePlaybackPosition()
         stopSubtitleTicker()
         try { video?.stopPlayback() } catch (_: Exception) {}
         try { cachedFile?.delete() } catch (_: Exception) {}
