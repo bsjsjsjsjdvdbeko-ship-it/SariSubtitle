@@ -33,6 +33,11 @@ import android.widget.Spinner
 import android.widget.TextView
 import android.widget.EditText
 import android.widget.Toast
+import android.view.View
+import android.widget.RelativeLayout
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import android.media.projection.MediaProjectionManager
 import android.content.pm.PackageManager
 import android.speech.tts.TextToSpeech
@@ -98,6 +103,8 @@ class SariSubtitleActivity : AppCompatActivity() {
     private var lastDubbingCueStartMs = -1L
     private var textToSpeech: TextToSpeech? = null
     private var activeOperationCancellation: OperationCancellation? = null
+    private var fullscreenMode = false
+    private var restoreOperationLogOnFullscreenExit = false
 
     /** آخر SRT نصي محمّل (للحفظ عند الحاجة) */
     private var lastSrtText: String? = null
@@ -376,6 +383,10 @@ class SariSubtitleActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.settingsButton).setOnClickListener {
             startActivity(Intent(this, SettingsCenterActivity::class.java))
+        }
+
+        findViewById<Button>(R.id.fullscreenButton).setOnClickListener {
+            setFullscreenMode(!fullscreenMode)
         }
 
         findViewById<Button>(R.id.offsetMinusButton).setOnClickListener {
@@ -3211,7 +3222,7 @@ private fun openAudioPicker() {
 
     /** Show a one-line summary for 4.5 seconds and reserve space instead of covering video. */
     private fun showCompactOperationLog() {
-        if (!::operationLogPanel.isInitialized || isFinishing) return
+        if (!::operationLogPanel.isInitialized || isFinishing || fullscreenMode) return
         handler.removeCallbacks(hideOperationLogRunnable)
         handler.removeCallbacks(liveQueueTick)
         liveSubtitleQueue.clear()
@@ -3222,13 +3233,17 @@ private fun openAudioPicker() {
 
     private fun updatePlaybackAreaForLogPanel() {
         if (!::webView.isInitialized) return
-        val showLog = ::operationLogPanel.isInitialized && operationLogPanel.visibility == android.view.View.VISIBLE
-        fun update(view: android.view.View) {
-            val params = view.layoutParams as? android.widget.RelativeLayout.LayoutParams ?: return
-            params.removeRule(android.widget.RelativeLayout.ABOVE)
-            params.addRule(android.widget.RelativeLayout.ABOVE, if (showLog) R.id.operationLogPanel else R.id.bottomBar)
-            params.removeRule(android.widget.RelativeLayout.BELOW)
-            params.addRule(android.widget.RelativeLayout.BELOW, R.id.topBar)
+        if (fullscreenMode) {
+            applyFullscreenPlaybackLayout(true)
+            return
+        }
+        val showLog = ::operationLogPanel.isInitialized && operationLogPanel.visibility == View.VISIBLE
+        fun update(view: View) {
+            val params = view.layoutParams as? RelativeLayout.LayoutParams ?: return
+            params.removeRule(RelativeLayout.ABOVE)
+            params.addRule(RelativeLayout.ABOVE, if (showLog) R.id.operationLogPanel else R.id.bottomBar)
+            params.removeRule(RelativeLayout.BELOW)
+            params.addRule(RelativeLayout.BELOW, R.id.topBar)
             view.layoutParams = params
         }
         update(webView)
@@ -3238,7 +3253,7 @@ private fun openAudioPicker() {
     /** Updates the visible status area from workflows that restore saved subtitles. */
     private fun showStatus(message: String) {
         statusText.text = message
-        statusText.visibility = android.view.View.VISIBLE
+        if (!fullscreenMode) statusText.visibility = View.VISIBLE
     }
 
     /** Handles blob:/data: downloads initiated by a page inside the WebView. */
@@ -3521,6 +3536,76 @@ private fun openAudioPicker() {
             Toast.makeText(this, "يجب السماح بإذن الصوت لتفعيل الالتقاط المباشر", Toast.LENGTH_LONG).show()
             statusText.text = "تم رفض إذن RECORD_AUDIO؛ لم يبدأ الالتقاط."
         }
+    }
+
+    /**
+     * Fullscreen mode keeps the existing WebView + SubtitleOverlay intact and only changes
+     * the surrounding chrome. No subtitle timing/state is modified.
+     */
+    private fun setFullscreenMode(enabled: Boolean) {
+        if (fullscreenMode == enabled) return
+        fullscreenMode = enabled
+
+        val topBar = findViewById<View>(R.id.topBar)
+        val bottomBar = findViewById<View>(R.id.bottomBar)
+        val status = findViewById<View>(R.id.statusText)
+        val logPanel = findViewById<View>(R.id.operationLogPanel)
+
+        if (enabled) {
+            restoreOperationLogOnFullscreenExit = logPanel.visibility == View.VISIBLE
+            topBar.visibility = View.GONE
+            bottomBar.visibility = View.GONE
+            status.visibility = View.GONE
+            logPanel.visibility = View.GONE
+            applyFullscreenPlaybackLayout(true)
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            WindowInsetsControllerCompat(window, window.decorView).apply {
+                hide(WindowInsetsCompat.Type.systemBars())
+                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
+            WindowCompat.setDecorFitsSystemWindows(window, true)
+            topBar.visibility = View.VISIBLE
+            bottomBar.visibility = View.VISIBLE
+            if (restoreOperationLogOnFullscreenExit) {
+                logPanel.visibility = View.VISIBLE
+            }
+            restoreOperationLogOnFullscreenExit = false
+            applyFullscreenPlaybackLayout(false)
+        }
+    }
+
+    private fun applyFullscreenPlaybackLayout(fullscreen: Boolean) {
+        if (!::webView.isInitialized) return
+        fun update(view: View) {
+            val params = view.layoutParams as? RelativeLayout.LayoutParams ?: return
+            params.removeRule(RelativeLayout.ABOVE)
+            params.removeRule(RelativeLayout.BELOW)
+            if (fullscreen) {
+                params.addRule(RelativeLayout.ALIGN_PARENT_TOP, RelativeLayout.TRUE)
+                params.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM, RelativeLayout.TRUE)
+            } else {
+                params.removeRule(RelativeLayout.ALIGN_PARENT_TOP)
+                params.removeRule(RelativeLayout.ALIGN_PARENT_BOTTOM)
+                params.addRule(RelativeLayout.BELOW, R.id.topBar)
+                val showLog = ::operationLogPanel.isInitialized && operationLogPanel.visibility == View.VISIBLE
+                params.addRule(RelativeLayout.ABOVE, if (showLog) R.id.operationLogPanel else R.id.bottomBar)
+            }
+            view.layoutParams = params
+        }
+        update(webView)
+        update(findViewById(R.id.webContainer))
+        webView.requestLayout()
+        findViewById<View>(R.id.webContainer).requestLayout()
+    }
+
+    override fun onBackPressed() {
+        if (fullscreenMode) {
+            setFullscreenMode(false)
+            return
+        }
+        super.onBackPressed()
     }
 
     override fun onDestroy() {

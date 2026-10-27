@@ -17,7 +17,7 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
         targetLang: String,
         context: List<String> = emptyList()
     ): List<String> {
-        require(texts.isNotEmpty() && texts.size <= 8) { "حجم دفعة OmniRoute غير صالح." }
+        require(texts.isNotEmpty() && texts.size <= 16) { "حجم دفعة OmniRoute غير صالح (الحد 16)." }
         val input = JSONArray().apply { texts.forEach { put(it) } }
         val prompt = """
             You are a professional subtitle translator. Translate every string in the JSON array below

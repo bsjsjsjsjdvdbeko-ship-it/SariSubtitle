@@ -21,6 +21,7 @@
     <string name="desc_dubbing">تشغيل أو إيقاف الدبلجة؛ اضغط مطولًا لإظهار الترجمة المكتوبة أو إخفائها</string>
     <string name="desc_export_dubbing">إنشاء ملف WAV للدبلجة مع الحفاظ على توقيتات SRT</string>
     <string name="desc_my_files">فتح ملفات الترجمة المحفوظة أو حذفها</string>
+    <string name="desc_fullscreen">ملء الشاشة؛ زر الرجوع يخرج من الوضع الكامل</string>
 
     <!-- Local media player -->
     <string name="local_player_title">مشغّل الفيديو المحلي</string>

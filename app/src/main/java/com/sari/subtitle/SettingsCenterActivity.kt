@@ -82,7 +82,7 @@ class SettingsCenterActivity : AppCompatActivity() {
         setBackgroundColor(Color.rgb(17, 24, 42))
 
         addView(Button(this@SettingsCenterActivity).apply {
-            setText("‹")
+            text = "‹"
             textSize = 28f
             setTextColor(Color.WHITE)
             background = transparentBackground()
@@ -450,8 +450,8 @@ class SettingsCenterActivity : AppCompatActivity() {
 
     private fun addButtonRow(card: LinearLayout, title: String, subtitle: String, action: () -> Unit) {
         val button = Button(this).apply {
-            setText("$title  ›")
-            isAllCaps = false
+            text = "$title  ›"
+            setAllCaps(false)
             textSize = 12f
             setTextColor(Color.WHITE)
             background = rounded(Color.rgb(48, 59, 90), 12f)

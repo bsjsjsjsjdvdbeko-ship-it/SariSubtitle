@@ -21,6 +21,9 @@ import java.net.URLEncoder
  */
 object SrtTranslationService {
 
+    // Batch size affects request grouping only. Original SRT timestamp lines remain untouched.
+    private const val TRANSLATION_BATCH_SIZE = 16
+
     private val timestampPattern = Regex("\\d{2}:\\d{2}:\\d{2}[,.]\\d{3}\\s*-->")
 
     /**
@@ -281,7 +284,7 @@ object SrtTranslationService {
         // Gemini receives up to eight subtitle texts per request to reduce API calls on long files.
         if (pending.isEmpty() && context != null) OperationLogStore.add(context, "ترجمة SRT", "ذاكرة التخزين المؤقت", "SRT translation cache", 0L,
             "نجاح", "${total} مقطع", "لم يلزم طلب شبكة")
-        for (batch in pending.chunked(8)) {
+        for (batch in pending.chunked(TRANSLATION_BATCH_SIZE)) {
             if (shouldCancel()) throw java.util.concurrent.CancellationException("ألغى المستخدم العملية")
             val batchStarted = android.os.SystemClock.elapsedRealtime()
             val batchTexts = batch.map { it.text }

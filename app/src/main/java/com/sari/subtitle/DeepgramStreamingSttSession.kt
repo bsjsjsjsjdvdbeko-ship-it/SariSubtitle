@@ -3,7 +3,6 @@ package com.sari.subtitle
 import android.os.SystemClock
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
-import okio.ByteString
 import okio.ByteString.Companion.toByteString
 import okhttp3.Request
 import okhttp3.Response

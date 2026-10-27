@@ -240,6 +240,20 @@
 
             <Button
                 android:textAllCaps="false"
+                android:id="@+id/fullscreenButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.7"
+                android:minHeight="46dp"
+                android:layout_marginStart="3dp"
+                android:textSize="19sp"
+                android:text="⛶"
+                android:background="@drawable/bg_sari_button_secondary"
+                android:textColor="@color/sari_text_primary"
+                android:contentDescription="@string/desc_fullscreen" />
+
+            <Button
+                android:textAllCaps="false"
                 android:id="@+id/savedItemsButton"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
