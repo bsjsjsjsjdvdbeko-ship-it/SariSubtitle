@@ -60,9 +60,10 @@ class LiveSttRouter(private val context: Context) {
     }
 
     private data class Routed(val provider: String, val language: String, val srt: String)
+    private data class TranscriptionResult(val language: String, val text: String, val srt: String, val segmentCount: Int)
 
     private fun route(config: Config, uri: Uri): Routed {
-        val settings = SubtitleSettings.load(context)
+        val settings = SubtitleSettings(context)
         val localInstalled = VoskModelManager.isInstalled(context, VoskModelManager.ARABIC) ||
             VoskModelManager.isInstalled(context, VoskModelManager.ENGLISH)
         val selected = config.selectedProvider
@@ -110,9 +111,15 @@ class LiveSttRouter(private val context: Context) {
                 qualityThreshold = QUALITY_FAILOVER_THRESHOLD,
                 operation = { id ->
                     when (provider(id)) {
-                        SubtitleSettings.STT_DEEPGRAM -> DeepgramTranscriptionService(context) { settings.deepgramApiKey }.transcribe(uri, config.language)
-                        SubtitleSettings.STT_OPENAI -> OpenAIWhisperService(context) { settings.openAiApiKey }.transcribe(uri, config.language)
-                        SubtitleSettings.STT_GROQ -> GroqWhisperService(context) { settings.groqApiKey }.transcribe(uri, config.language)
+                        SubtitleSettings.STT_DEEPGRAM -> DeepgramTranscriptionService(context) { settings.deepgramApiKey }
+                            .transcribe(uri, config.language)
+                            .let { TranscriptionResult(it.language, it.text, it.srt, it.segmentCount) }
+                        SubtitleSettings.STT_OPENAI -> OpenAIWhisperService(context) { settings.openAiApiKey }
+                            .transcribe(uri, config.language)
+                            .let { TranscriptionResult(it.language, it.text, it.srt, it.segmentCount) }
+                        SubtitleSettings.STT_GROQ -> GroqWhisperService(context) { settings.groqApiKey }
+                            .transcribe(uri, config.language)
+                            .let { TranscriptionResult(it.language, it.text, it.srt, it.segmentCount) }
                         else -> throw IllegalStateException("Provider STT غير مدعوم: $id")
                     }
                 },

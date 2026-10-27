@@ -293,7 +293,7 @@ class LiveCaptureService : Service() {
     }
 
     private fun shouldUseDeepgramStreaming(): Boolean {
-        val settings = SubtitleSettings.load(applicationContext)
+        val settings = SubtitleSettings(applicationContext)
         val keyReady = settings.deepgramApiKey.isNotBlank()
         if (!keyReady) return false
 
@@ -324,7 +324,7 @@ class LiveCaptureService : Service() {
     }
 
     private fun startDeepgramStreaming() {
-        val settings = SubtitleSettings.load(applicationContext)
+        val settings = SubtitleSettings(applicationContext)
         if (settings.deepgramApiKey.isBlank()) {
             useStreamingStt = false
             startSttWorker()
@@ -332,7 +332,7 @@ class LiveCaptureService : Service() {
         }
 
         val session = DeepgramStreamingSttSession(
-            apiKeyProvider = { SubtitleSettings.load(applicationContext).deepgramApiKey },
+            apiKeyProvider = { SubtitleSettings(applicationContext).deepgramApiKey },
             sourceLanguage = workerLanguage,
             onEvent = { event -> onStreamingTranscript(event, sessionId) },
             onStatus = { status, detail -> publishStatus(status, detail) },
