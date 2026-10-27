@@ -42,6 +42,7 @@ class SubtitleOverlay @JvmOverloads constructor(
             gravity = Gravity.CENTER
             setPadding(28, 18, 28, 18)
             setHorizontallyScrolling(false)
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
             setBackgroundColor(Color.argb(180, 0, 0, 0))
             setShadowLayer(6f, 0f, 2f, Color.BLACK)
             text = "Sari Subtitle"
@@ -50,11 +51,13 @@ class SubtitleOverlay @JvmOverloads constructor(
             isFocusable = false
         }
 
+        // Keep a stable, screen-centered text box. A fixed-width box prevents
+        // short/long Arabic subtitles from changing their horizontal anchor.
         val lp = LayoutParams(
-            LayoutParams.WRAP_CONTENT,
+            LayoutParams.MATCH_PARENT,
             LayoutParams.WRAP_CONTENT
         ).apply {
-            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            gravity = Gravity.BOTTOM
             bottomMargin = 70
             leftMargin = 20
             rightMargin = 20
@@ -102,13 +105,12 @@ class SubtitleOverlay @JvmOverloads constructor(
     private fun moveSubtitleTo(rawY: Float) {
         val maxY = (height - textView.height - paddingTop - paddingBottom).coerceAtLeast(0)
         val clampedY = rawY.coerceIn(paddingTop.toFloat(), (paddingTop + maxY).toFloat())
-        // Keep X centered regardless of touch movement or text width.
-        textView.x = ((width - textView.width) / 2f).coerceAtLeast(0f)
+        // X is locked by the MATCH_PARENT layout; only Y is draggable.
+        textView.x = 0f
         textView.y = clampedY
     }
 
     private fun persistCurrentPosition() {
-        val maxX = (width - textView.width - paddingLeft - paddingRight).coerceAtLeast(1)
         val maxY = (height - textView.height - paddingTop - paddingBottom).coerceAtLeast(1)
         // X is deliberately not persisted; it is always centered.
         subtitleSettings.subtitleDragX = 0.5f
