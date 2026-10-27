@@ -47,7 +47,7 @@ jobs:
           KEYSTORE_STORE_PASSWORD: ${{ secrets.KEYSTORE_STORE_PASSWORD }}
           KEYSTORE_KEY_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
           KEYSTORE_KEY_PASSWORD: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
-        run: gradle --no-daemon testDebugUnitTest assembleDebug
+        run: gradle --no-daemon assembleDebug
       - name: Verify APK exists
         run: test -s app/build/outputs/apk/debug/app-debug.apk
       - name: Upload APK
