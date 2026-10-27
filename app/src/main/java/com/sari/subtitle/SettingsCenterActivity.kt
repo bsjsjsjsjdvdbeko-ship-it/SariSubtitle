@@ -38,8 +38,6 @@ class SettingsCenterActivity : AppCompatActivity() {
     private lateinit var appearancePreview: TextView
     private lateinit var sizeValue: TextView
     private lateinit var offsetValue: TextView
-    private lateinit var translationStatus: TextView
-    private lateinit var sttStatus: TextView
     private lateinit var boldSwitch: Switch
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -84,7 +82,7 @@ class SettingsCenterActivity : AppCompatActivity() {
         setBackgroundColor(Color.rgb(17, 24, 42))
 
         addView(Button(this@SettingsCenterActivity).apply {
-            text = "‹"
+            setText("‹")
             textSize = 28f
             setTextColor(Color.WHITE)
             background = transparentBackground()
@@ -128,20 +126,17 @@ class SettingsCenterActivity : AppCompatActivity() {
         addStatusRow(
             "الترجمة",
             translationProviderLabel(),
-            translationStatusText(),
-            { translationStatus }
+            translationStatusText()
         )
         addStatusRow(
             "التفريغ الصوتي STT",
             settings.sttProviderLabel,
-            sttStatusText(),
-            { sttStatus }
+            sttStatusText()
         )
         addStatusRow(
             "مظهر الترجمة",
             "${settings.textSize.toInt()}sp • ${if (settings.bold) "عريض" else "عادي"} • ${SubtitleSettings.POSITION_LABELS[settings.position.coerceIn(0, 2)]}",
-            "يُطبّق مباشرة على إعدادات SubtitleSettings الحالية.",
-            null
+            "يُطبّق مباشرة على إعدادات SubtitleSettings الحالية."
         )
 
         addSectionHeader("الترجمة", "اضبط المسار الأساسي دون فقدان الإعدادات الحالية")
@@ -403,7 +398,7 @@ class SettingsCenterActivity : AppCompatActivity() {
         setStroke(dp(1), Color.argb(80, 255, 255, 255))
     }
 
-    private fun addStatusRow(title: String, value: String, detail: String, statusHolder: (() -> TextView)?) {
+    private fun addStatusRow(title: String, value: String, detail: String) {
         val card = cardBase()
         val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -418,7 +413,6 @@ class SettingsCenterActivity : AppCompatActivity() {
         top.addView(state)
         card.addView(top)
         rootContent.addView(card)
-        statusHolder?.invoke()?.let { /* reserved for future live health state */ }
     }
 
     private fun addSectionHeader(title: String, subtitle: String) {
@@ -456,8 +450,8 @@ class SettingsCenterActivity : AppCompatActivity() {
 
     private fun addButtonRow(card: LinearLayout, title: String, subtitle: String, action: () -> Unit) {
         val button = Button(this).apply {
-            text = "$title  ›"
-            setAllCaps(false)
+            setText("$title  ›")
+            isAllCaps = false
             textSize = 12f
             setTextColor(Color.WHITE)
             background = rounded(Color.rgb(48, 59, 90), 12f)
