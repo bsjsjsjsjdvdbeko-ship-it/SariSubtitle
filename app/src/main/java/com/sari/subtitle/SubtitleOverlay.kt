@@ -41,6 +41,7 @@ class SubtitleOverlay @JvmOverloads constructor(
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             setPadding(28, 18, 28, 18)
+            setHorizontallyScrolling(false)
             setBackgroundColor(Color.argb(180, 0, 0, 0))
             setShadowLayer(6f, 0f, 2f, Color.BLACK)
             text = "Sari Subtitle"
@@ -76,13 +77,13 @@ class SubtitleOverlay @JvmOverloads constructor(
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
-                val dx = event.rawX - downRawX
+                // X is intentionally locked: subtitles stay horizontally centered.
                 val dy = event.rawY - downRawY
                 if (!dragging && (kotlin.math.abs(dx) > dragTouchSlop || kotlin.math.abs(dy) > dragTouchSlop)) {
                     dragging = true
                 }
                 if (dragging) {
-                    moveSubtitleTo(downViewX + dx, downViewY + dy)
+                    moveSubtitleTo(downViewY + dy)
                 }
                 return true
             }
@@ -98,19 +99,19 @@ class SubtitleOverlay @JvmOverloads constructor(
         return true
     }
 
-    private fun moveSubtitleTo(rawX: Float, rawY: Float) {
-        val maxX = (width - textView.width - paddingLeft - paddingRight).coerceAtLeast(0)
+    private fun moveSubtitleTo(rawY: Float) {
         val maxY = (height - textView.height - paddingTop - paddingBottom).coerceAtLeast(0)
-        val clampedX = rawX.coerceIn(paddingLeft.toFloat(), (paddingLeft + maxX).toFloat())
         val clampedY = rawY.coerceIn(paddingTop.toFloat(), (paddingTop + maxY).toFloat())
-        textView.x = clampedX
+        // Keep X centered regardless of touch movement or text width.
+        textView.x = ((width - textView.width) / 2f).coerceAtLeast(0f)
         textView.y = clampedY
     }
 
     private fun persistCurrentPosition() {
         val maxX = (width - textView.width - paddingLeft - paddingRight).coerceAtLeast(1)
         val maxY = (height - textView.height - paddingTop - paddingBottom).coerceAtLeast(1)
-        subtitleSettings.subtitleDragX = ((textView.x - paddingLeft) / maxX).coerceIn(0f, 1f)
+        // X is deliberately not persisted; it is always centered.
+        subtitleSettings.subtitleDragX = 0.5f
         subtitleSettings.subtitleDragY = ((textView.y - paddingTop) / maxY).coerceIn(0f, 1f)
         subtitleSettings.hasCustomSubtitlePosition = true
     }
@@ -119,11 +120,9 @@ class SubtitleOverlay @JvmOverloads constructor(
         if (!settings.hasCustomSubtitlePosition) return
         post {
             if (width <= 0 || height <= 0 || textView.width <= 0 || textView.height <= 0) return@post
-            val maxX = (width - textView.width - paddingLeft - paddingRight).coerceAtLeast(0)
             val maxY = (height - textView.height - paddingTop - paddingBottom).coerceAtLeast(0)
-            val x = paddingLeft + (maxX * settings.subtitleDragX)
             val y = paddingTop + (maxY * settings.subtitleDragY)
-            moveSubtitleTo(x, y)
+            moveSubtitleTo(y)
         }
     }
 
@@ -190,6 +189,11 @@ class SubtitleOverlay @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        if (w > 0) {
+            // Keep long Arabic subtitles inside the screen with natural line wrapping.
+            textView.maxWidth = (w * 0.92f).toInt().coerceAtLeast(1)
+            textView.requestLayout()
+        }
         if (w > 0 && h > 0 && subtitleSettings.hasCustomSubtitlePosition) {
             restoreSavedPosition(subtitleSettings)
         }

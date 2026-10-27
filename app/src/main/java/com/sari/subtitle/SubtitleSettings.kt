@@ -16,6 +16,7 @@ class SubtitleSettings(context: Context) {
         private const val KEY_DRAG_X = "subtitle_drag_x"
         private const val KEY_DRAG_Y = "subtitle_drag_y"
         private const val KEY_DRAG_CUSTOM = "subtitle_drag_custom"
+        private const val KEY_PREFERRED_LANDSCAPE = "preferred_landscape"
         private const val KEY_TEXT_COLOR = "text_color"
         private const val KEY_BG_COLOR = "bg_color"
         private const val KEY_BOLD = "bold"
@@ -198,6 +199,11 @@ class SubtitleSettings(context: Context) {
     var hasCustomSubtitlePosition: Boolean
         get() = prefs.getBoolean(KEY_DRAG_CUSTOM, false)
         set(v) = prefs.edit().putBoolean(KEY_DRAG_CUSTOM, v).apply()
+
+    /** تفضيل اتجاه العرض: true = أفقي Landscape، false = عمودي Portrait. */
+    var preferredLandscape: Boolean
+        get() = prefs.getBoolean(KEY_PREFERRED_LANDSCAPE, false)
+        set(v) = prefs.edit().putBoolean(KEY_PREFERRED_LANDSCAPE, v).apply()
 
     fun resetSubtitlePosition() {
         prefs.edit()

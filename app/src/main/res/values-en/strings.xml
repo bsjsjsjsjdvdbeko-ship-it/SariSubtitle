@@ -36,4 +36,5 @@
     <string name="local_player_init_failed">The video player could not be initialized. Try another video file.</string>
     <string name="local_player_seek_failed">Unable to seek in the video</string>
     <string name="local_player_toggle_failed">Unable to play the video</string>
+    <string name="desc_rotation">Rotate screen between landscape and portrait</string>
 </resources>

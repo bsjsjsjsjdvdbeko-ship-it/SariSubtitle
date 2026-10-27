@@ -337,6 +337,22 @@ class SettingsCenterActivity : AppCompatActivity() {
             refreshUi()
         }
 
+        val landscapeSwitch = Switch(this).apply {
+            text = "تفضيل العرض الأفقي Landscape"
+            textSize = 13f
+            setTextColor(Color.WHITE)
+            isChecked = settings.preferredLandscape
+            setOnCheckedChangeListener { _, checked ->
+                settings.preferredLandscape = checked
+                Toast.makeText(
+                    this@SettingsCenterActivity,
+                    if (checked) "تم حفظ تفضيل العرض الأفقي" else "تم حفظ تفضيل العرض العمودي",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+        card.addView(landscapeSwitch)
+
         card.addView(label("لون النص", 12f, Color.rgb(167, 176, 200)))
         val textColor = darkSpinner(SubtitleSettings.TEXT_COLOR_LABELS, settings.textColorIndex.coerceIn(0, SubtitleSettings.TEXT_COLOR_LABELS.lastIndex))
         textColor.onItemSelectedListener = simpleItemListener { index ->

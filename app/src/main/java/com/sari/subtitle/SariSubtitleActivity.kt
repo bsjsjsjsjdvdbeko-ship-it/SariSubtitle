@@ -40,6 +40,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import android.media.projection.MediaProjectionManager
 import android.content.pm.PackageManager
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
@@ -106,6 +108,7 @@ class SariSubtitleActivity : AppCompatActivity() {
     private var textToSpeech: TextToSpeech? = null
     private var activeOperationCancellation: OperationCancellation? = null
     private var fullscreenMode = false
+    private var restoringOrientation = false
     private var restoreOperationLogOnFullscreenExit = false
 
     /** آخر SRT نصي محمّل (للحفظ عند الحاجة) */
@@ -147,6 +150,7 @@ class SariSubtitleActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         settings = SubtitleSettings(this)
+        applyPreferredOrientation()
         storage = SrtStorage(this)
         playbackStore = PlaybackPositionStore(this)
         repo.offsetMs = settings.offsetMs
@@ -402,6 +406,11 @@ class SariSubtitleActivity : AppCompatActivity() {
         findViewById<Button>(R.id.fullscreenButton).setOnClickListener {
             setFullscreenMode(!fullscreenMode)
         }
+
+        findViewById<Button>(R.id.rotationButton).setOnClickListener {
+            toggleScreenOrientation()
+        }
+        updateRotationButton()
 
         findViewById<Button>(R.id.offsetMinusButton).setOnClickListener {
             changeOffset(-OFFSET_STEP_MS)
@@ -3652,6 +3661,7 @@ private fun openAudioPicker() {
 
         if (enabled) {
             restoreOperationLogOnFullscreenExit = logPanel.visibility == View.VISIBLE
+            applyPreferredOrientation()
             topBar.visibility = View.GONE
             bottomBar.visibility = View.GONE
             status.visibility = View.GONE
@@ -3672,7 +3682,45 @@ private fun openAudioPicker() {
             }
             restoreOperationLogOnFullscreenExit = false
             applyFullscreenPlaybackLayout(false)
+            // العودة للوضع العمودي عند مغادرة Fullscreen، مع إبقاء تفضيل المستخدم محفوظاً.
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
+            updateRotationButton()
         }
+    }
+
+    private fun applyPreferredOrientation() {
+        if (restoringOrientation || isFinishing || !::settings.isInitialized) return
+        restoringOrientation = true
+        try {
+            setRequestedOrientation(
+                if (settings.preferredLandscape) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            )
+        } finally {
+            restoringOrientation = false
+        }
+        updateRotationButton()
+    }
+
+    private fun toggleScreenOrientation() {
+        if (!::settings.isInitialized) return
+        val nextLandscape = !settings.preferredLandscape
+        settings.preferredLandscape = nextLandscape
+        setRequestedOrientation(
+            if (nextLandscape) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        )
+        updateRotationButton()
+    }
+
+    private fun updateRotationButton() {
+        if (!::settings.isInitialized) return
+        findViewById<Button>(R.id.rotationButton)?.contentDescription =
+            if (settings.preferredLandscape) {
+                "تدوير الشاشة: العرض الأفقي مفعّل؛ اضغط للعودة إلى العمودي"
+            } else {
+                "تدوير الشاشة: الوضع العمودي مفعّل؛ اضغط للعرض الأفقي"
+            }
     }
 
     private fun applyFullscreenPlaybackLayout(fullscreen: Boolean) {
@@ -3699,6 +3747,16 @@ private fun openAudioPicker() {
         findViewById<View>(R.id.webContainer).requestLayout()
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (::subtitleOverlay.isInitialized) {
+            subtitleOverlay.applySettings(SubtitleSettings(this))
+        }
+        if (::webView.isInitialized) webView.requestLayout()
+        if (fullscreenMode) applyFullscreenPlaybackLayout(true) else updatePlaybackAreaForLogPanel()
+        updateRotationButton()
+    }
+
     override fun onBackPressed() {
         if (fullscreenMode) {
             setFullscreenMode(false)
@@ -3712,6 +3770,7 @@ private fun openAudioPicker() {
         if (::settings.isInitialized && ::subtitleOverlay.isInitialized) {
             settings = SubtitleSettings(this)
             subtitleOverlay.applySettings(settings)
+            updateRotationButton()
         }
     }
 

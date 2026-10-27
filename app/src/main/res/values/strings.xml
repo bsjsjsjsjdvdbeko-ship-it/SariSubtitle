@@ -22,6 +22,7 @@
     <string name="desc_export_dubbing">إنشاء ملف WAV للدبلجة مع الحفاظ على توقيتات SRT</string>
     <string name="desc_my_files">فتح ملفات الترجمة المحفوظة أو حذفها</string>
     <string name="desc_fullscreen">ملء الشاشة؛ زر الرجوع يخرج من الوضع الكامل</string>
+    <string name="desc_rotation">تدوير الشاشة إلى الوضع الأفقي أو العمودي</string>
 
     <!-- Local media player -->
     <string name="local_player_title">مشغّل الفيديو المحلي</string>
