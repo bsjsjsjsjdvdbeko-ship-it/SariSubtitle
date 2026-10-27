@@ -79,7 +79,7 @@ class SubtitleOverlay @JvmOverloads constructor(
             MotionEvent.ACTION_MOVE -> {
                 // X is intentionally locked: subtitles stay horizontally centered.
                 val dy = event.rawY - downRawY
-                if (!dragging && (kotlin.math.abs(dx) > dragTouchSlop || kotlin.math.abs(dy) > dragTouchSlop)) {
+                if (!dragging && kotlin.math.abs(dy) > dragTouchSlop) {
                     dragging = true
                 }
                 if (dragging) {
