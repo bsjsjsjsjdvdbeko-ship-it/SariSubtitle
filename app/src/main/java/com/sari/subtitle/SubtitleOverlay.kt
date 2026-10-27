@@ -123,7 +123,7 @@ class SubtitleOverlay @JvmOverloads constructor(
             val maxY = (height - textView.height - paddingTop - paddingBottom).coerceAtLeast(0)
             val x = paddingLeft + (maxX * settings.subtitleDragX)
             val y = paddingTop + (maxY * settings.subtitleDragY)
-            moveSubtitleTo(x, y, persist = false)
+            moveSubtitleTo(x, y)
         }
     }
 
