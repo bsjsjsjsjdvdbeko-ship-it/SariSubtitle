@@ -215,7 +215,8 @@ class SrtStorage(private val context: Context) {
         } catch (_: Exception) { false }
     }
 
-    fun libraryItem(id: String): SavedSrtItem? = try {
+    fun libraryItem(id: String): SavedSrtItem? {
+        return try {
         val entry = readLibraryIndex().optJSONObject(id) ?: return null
         val fileName = entry.optString("fileName")
         if (safeSrtFile(fileName)?.isFile != true) return null
@@ -230,6 +231,7 @@ class SrtStorage(private val context: Context) {
             localVideoTitle = entry.optString("localVideoTitle").takeIf { it.isNotBlank() }
         )
     } catch (_: Exception) { null }
+}
 
     private fun isLocalVideoUri(raw: String): Boolean {
         return try {

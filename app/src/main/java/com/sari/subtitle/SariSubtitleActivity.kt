@@ -36,6 +36,7 @@ import android.widget.TextView
 import android.widget.EditText
 import android.widget.Toast
 import android.view.View
+import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.RelativeLayout
 import androidx.core.view.WindowCompat
