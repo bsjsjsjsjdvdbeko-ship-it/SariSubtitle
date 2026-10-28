@@ -18,6 +18,7 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.MediaController
+import android.media.MediaPlayer
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -68,6 +69,8 @@ class LocalMediaPlayerActivity : Activity() {
     private var dragStartRawY = 0f
     private var dragStartViewY = 0f
     private var dragTouchSlop = 0f
+    private var videoContentWidth = 0
+    private var videoContentHeight = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -234,6 +237,13 @@ class LocalMediaPlayerActivity : Activity() {
                 try {
                     prepared = true
                     mediaPlayer.isLooping = false
+                    videoContentWidth = mediaPlayer.videoWidth
+                    videoContentHeight = mediaPlayer.videoHeight
+                    mediaPlayer.setOnVideoSizeChangedListener { _, width, height ->
+                        videoContentWidth = width
+                        videoContentHeight = height
+                        playerFrame?.post { fitVideoToContainer() }
+                    }
                     fitVideoToContainer()
                     playerFrame?.post {
                         fitVideoToContainer()
@@ -350,8 +360,8 @@ class LocalMediaPlayerActivity : Activity() {
     private fun fitVideoToContainer() {
         val player = video ?: return
         val frame = playerFrame ?: return
-        val videoWidth = runCatching { player.videoWidth }.getOrDefault(0)
-        val videoHeight = runCatching { player.videoHeight }.getOrDefault(0)
+        val videoWidth = videoContentWidth
+        val videoHeight = videoContentHeight
         if (videoWidth <= 0 || videoHeight <= 0 || frame.width <= 0 || frame.height <= 0) return
 
         // VideoView remains MATCH_PARENT. Scale the SurfaceView uniformly enough to
