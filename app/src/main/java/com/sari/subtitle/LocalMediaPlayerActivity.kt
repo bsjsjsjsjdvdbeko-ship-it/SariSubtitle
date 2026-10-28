@@ -127,7 +127,7 @@ class LocalMediaPlayerActivity : Activity() {
                 text = if (cues.isEmpty()) getString(R.string.local_player_no_subtitles) else ""
                 textSize = subtitleSizeSp
                 setTextColor(0xFFFFFFFF.toInt())
-                setBackgroundColor(0xCC171B2D.toInt())
+                setBackgroundColor(Color.TRANSPARENT)
                 gravity = Gravity.CENTER
                 textAlignment = View.TEXT_ALIGNMENT_CENTER
                 setHorizontallyScrolling(false)
@@ -360,24 +360,21 @@ class LocalMediaPlayerActivity : Activity() {
     private fun fitVideoToContainer() {
         val player = video ?: return
         val frame = playerFrame ?: return
-        val videoWidth = videoContentWidth
-        val videoHeight = videoContentHeight
-        if (videoWidth <= 0 || videoHeight <= 0 || frame.width <= 0 || frame.height <= 0) return
+        if (frame.width <= 0 || frame.height <= 0) return
 
-        // VideoView remains MATCH_PARENT. Scale the SurfaceView uniformly enough to
-        // cover the entire container (CENTER_CROP behavior), avoiding a small video
-        // stuck in one corner when the device changes to landscape.
-        val containerRatio = frame.width.toFloat() / frame.height.toFloat()
-        val videoRatio = videoWidth.toFloat() / videoHeight.toFloat()
-        if (videoRatio > containerRatio) {
-            player.scaleX = (videoRatio / containerRatio).coerceAtLeast(1f)
-            player.scaleY = 1f
-        } else {
-            player.scaleX = 1f
-            player.scaleY = (containerRatio / videoRatio).coerceAtLeast(1f)
-        }
+        // Keep VideoView itself MATCH_PARENT and let its internal SurfaceView/MediaPlayer
+        // perform the normal video layout. Do not scale the VideoView with scaleX/scaleY:
+        // scaling the VideoView can move/clip its SurfaceView and result in audio-only
+        // playback on some Android devices/document providers.
+        player.scaleX = 1f
+        player.scaleY = 1f
         player.pivotX = frame.width / 2f
         player.pivotY = frame.height / 2f
+        player.translationX = 0f
+        player.translationY = 0f
+        player.visibility = View.VISIBLE
+        player.bringToFront()
+        subtitleView?.bringToFront()
     }
 
     private fun maybeOfferResume(player: VideoView, source: String) {

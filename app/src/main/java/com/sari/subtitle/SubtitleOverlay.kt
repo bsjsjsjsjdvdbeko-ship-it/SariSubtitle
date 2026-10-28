@@ -44,7 +44,7 @@ class SubtitleOverlay @JvmOverloads constructor(
             setHorizontallyScrolling(false)
             textAlignment = View.TEXT_ALIGNMENT_CENTER
             // Keep subtitles readable over both dark and bright video frames.
-            setBackgroundColor(Color.argb(180, 0, 0, 0))
+            setBackgroundColor(Color.TRANSPARENT)
             setShadowLayer(6f, 0f, 2f, Color.BLACK)
             text = "Sari Subtitle"
             visibility = View.GONE
@@ -140,7 +140,7 @@ class SubtitleOverlay @JvmOverloads constructor(
         textView.setTextColor(settings.textColor)
 
         // خلفية
-        textView.setBackgroundColor(settings.bgColor)
+        textView.setBackgroundColor(Color.TRANSPARENT)
 
         // عريض
         textView.typeface = if (settings.bold) {
