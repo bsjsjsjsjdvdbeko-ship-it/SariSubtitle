@@ -2,6 +2,9 @@ package com.sari.subtitle
 
 import com.sari.subtitle.v2.R
 import android.app.Activity
+import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -10,6 +13,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.MediaController
 import android.widget.SeekBar
@@ -28,6 +32,8 @@ class LocalMediaPlayerActivity : Activity() {
         private const val TICK_MS = 200L
         private const val MIN_SUBTITLE_SP = 14f
         private const val MAX_SUBTITLE_SP = 32f
+        private const val REQUEST_EXPORT_SRT = 5801
+        private const val STATE_FULLSCREEN = "local_player_fullscreen"
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -47,18 +53,28 @@ class LocalMediaPlayerActivity : Activity() {
     private var resumePromptShown = false
     private var resumeApplied = false
     private var lastPlaybackSaveMs = 0L
+    private var loadedSrt = ""
+    private var isFullscreen = false
+    private lateinit var subtitleSettings: SubtitleSettings
+    private var playerRoot: LinearLayout? = null
+    private var titleView: View? = null
+    private var positionControlsView: View? = null
+    private var seekControlsView: View? = null
+    private var playbackControlsView: View? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
+            subtitleSettings = SubtitleSettings(this)
+            applySavedOrientation()
             playbackStore = PlaybackPositionStore(this)
             val uri = intent?.data
             if (uri == null || (uri.scheme != "content" && uri.scheme != "file")) {
                 showOpenError(getString(R.string.local_player_invalid_uri))
                 return
             }
-            val srt = intent.getStringExtra(EXTRA_SRT).orEmpty()
-            cues = runCatching { SrtParser.parse(srt.byteInputStream(Charsets.UTF_8)) }.getOrDefault(emptyList())
+            loadedSrt = intent.getStringExtra(EXTRA_SRT).orEmpty()
+            cues = runCatching { SrtParser.parse(loadedSrt.byteInputStream(Charsets.UTF_8)) }.getOrDefault(emptyList())
             playbackSourceKey = playbackStore.keyFor(uri.toString())
 
             val root = LinearLayout(this).apply {
@@ -67,7 +83,7 @@ class LocalMediaPlayerActivity : Activity() {
                 setPadding(dp(12), dp(12), dp(12), dp(12))
                 setBackgroundColor(0xFF101426.toInt())
             }
-            root.addView(TextView(this).apply {
+            titleView = TextView(this).apply {
                 text = intent.getStringExtra(EXTRA_TITLE)?.takeIf(String::isNotBlank)
                     ?: getString(R.string.local_player_title)
                 textSize = 18f
@@ -75,7 +91,8 @@ class LocalMediaPlayerActivity : Activity() {
                 gravity = Gravity.CENTER_VERTICAL
                 maxLines = 2
                 setPadding(dp(4), dp(4), dp(4), dp(10))
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            }
+            root.addView(titleView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
             val player = VideoView(this)
             video = player
@@ -101,6 +118,7 @@ class LocalMediaPlayerActivity : Activity() {
                 setTextColor(0xFFD5D9EA.toInt())
                 gravity = Gravity.CENTER
             }
+            positionControlsView = positionView
             root.addView(positionView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
             seekBar = SeekBar(this).apply {
@@ -128,6 +146,7 @@ class LocalMediaPlayerActivity : Activity() {
                     }
                 })
             }
+            seekControlsView = seekBar
             root.addView(seekBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
             val controls = LinearLayout(this).apply {
@@ -140,8 +159,21 @@ class LocalMediaPlayerActivity : Activity() {
             controls.addView(controlButton("+10s") { safeSeek(10_000) })
             controls.addView(controlButton("A−") { changeSubtitleSize(-2f) })
             controls.addView(controlButton("A+") { changeSubtitleSize(2f) })
-            root.addView(controls, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            controls.addView(controlButton("💾 تصدير") { exportSrt() })
+            controls.addView(controlButton("⛶ ملء الشاشة") { toggleFullscreen() })
+            controls.addView(controlButton("↻ تدوير") { toggleRotation() })
+            val controlsScroll = HorizontalScrollView(this).apply {
+                isHorizontalScrollBarEnabled = false
+                isFillViewport = true
+                addView(controls, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            }
+            playbackControlsView = controlsScroll
+            root.addView(controlsScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            playerRoot = root
             setContentView(root)
+            if (savedInstanceState?.getBoolean(STATE_FULLSCREEN, false) == true) {
+                toggleFullscreen()
+            }
 
             player.setMediaController(MediaController(this))
             player.setOnPreparedListener { mediaPlayer ->
@@ -242,8 +274,109 @@ class LocalMediaPlayerActivity : Activity() {
         playbackStore.saveByKey(sourceKey, position, duration)
     }
 
+    private fun exportSrt() {
+        if (loadedSrt.isBlank()) {
+            Toast.makeText(this, "لا توجد ترجمة SRT لتصديرها", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val rawTitle = intent.getStringExtra(EXTRA_TITLE)?.takeIf(String::isNotBlank) ?: "sari_subtitle"
+        val safeTitle = rawTitle.replace(Regex("[\\/:*?\"<>|]"), "_").trim().ifBlank { "sari_subtitle" }
+        val filename = if (safeTitle.lowercase(Locale.ROOT).endsWith(".srt")) safeTitle else "$safeTitle.srt"
+        val create = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/x-subrip"
+            putExtra(Intent.EXTRA_TITLE, filename)
+        }
+        try {
+            startActivityForResult(create, REQUEST_EXPORT_SRT)
+        } catch (error: Exception) {
+            android.util.Log.e("SariMyFiles", "Unable to open SRT export picker", error)
+            Toast.makeText(this, "تعذر فتح نافذة حفظ ملف SRT", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_EXPORT_SRT || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        try {
+            contentResolver.openOutputStream(uri)?.use { output ->
+                output.write(loadedSrt.toByteArray(Charsets.UTF_8))
+                output.flush()
+            } ?: throw IOException("تعذر فتح ملف الحفظ")
+            Toast.makeText(this, "تم تصدير ملف الترجمة بنجاح", Toast.LENGTH_SHORT).show()
+        } catch (error: Exception) {
+            android.util.Log.e("SariMyFiles", "SRT export failed", error)
+            Toast.makeText(this, "تعذر تصدير ملف SRT", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun toggleFullscreen() {
+        isFullscreen = !isFullscreen
+        val visibility = if (isFullscreen) View.GONE else View.VISIBLE
+        titleView?.visibility = visibility
+        positionControlsView?.visibility = visibility
+        seekControlsView?.visibility = visibility
+        playbackControlsView?.visibility = visibility
+        playerRoot?.setPadding(
+            if (isFullscreen) 0 else dp(12),
+            if (isFullscreen) 0 else dp(12),
+            if (isFullscreen) 0 else dp(12),
+            if (isFullscreen) 0 else dp(12)
+        )
+        if (isFullscreen) {
+            window.decorView.systemUiVisibility = (
+                View.SYSTEM_UI_FLAG_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                )
+        } else {
+            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        }
+        if (!isFullscreen) window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+    }
+
+    private fun toggleRotation() {
+        val nextLandscape = resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
+        subtitleSettings.preferredLandscape = nextLandscape
+        requestedOrientation = if (nextLandscape) {
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+    }
+
+    private fun applySavedOrientation() {
+        requestedOrientation = if (subtitleSettings.preferredLandscape) {
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+    }
+
+    private fun exitFullscreenIfNeeded(): Boolean {
+        if (!isFullscreen) return false
+        isFullscreen = false
+        titleView?.visibility = View.VISIBLE
+        positionControlsView?.visibility = View.VISIBLE
+        seekControlsView?.visibility = View.VISIBLE
+        playbackControlsView?.visibility = View.VISIBLE
+        playerRoot?.setPadding(dp(12), dp(12), dp(12), dp(12))
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        return true
+    }
+
+    @Deprecated("Deprecated in Android 13; retained for minSdk compatibility")
+    override fun onBackPressed() {
+        if (exitFullscreenIfNeeded()) return
+        super.onBackPressed()
+    }
+
     private fun controlButton(label: String, action: () -> Unit) = Button(this).apply {
-        text = label
+        setText(label)
         isAllCaps = false
         setPadding(dp(4), 0, dp(4), 0)
         setOnClickListener { action() }
@@ -367,6 +500,11 @@ class LocalMediaPlayerActivity : Activity() {
         } catch (error: Exception) {
             android.util.Log.e("SariMyFiles", "Unable to close failed local player", error)
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(STATE_FULLSCREEN, isFullscreen)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onPause() {
