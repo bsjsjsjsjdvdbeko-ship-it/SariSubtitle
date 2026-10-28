@@ -7,7 +7,16 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 
-data class SavedSrtItem(val id: String, val title: String, val cueCount: Int, val savedAt: Long, val sourceUrl: String? = null)
+data class SavedSrtItem(
+    val id: String,
+    val title: String,
+    val cueCount: Int,
+    val savedAt: Long,
+    val sourceUrl: String? = null,
+    val sourceTitle: String? = null,
+    val localVideoUri: String? = null,
+    val localVideoTitle: String? = null
+)
 
 /**
  * إدارة تخزين ملفات SRT محلياً، مع فهرس URL → ملف.
@@ -34,7 +43,15 @@ class SrtStorage(private val context: Context) {
      * عند وجود سجل سابق لنفس منشور X (Status ID) أو لنفس مصدر الفيديو، يتم تحديثه
      * وإزالة السجلات المكررة بدلاً من إنشاء سجل جديد.
      */
-    fun saveLibraryItem(title: String, srtText: String, cueCount: Int, sourceUrl: String? = null): String? {
+    fun saveLibraryItem(
+        title: String,
+        srtText: String,
+        cueCount: Int,
+        sourceUrl: String? = null,
+        sourceTitle: String? = null,
+        localVideoUri: String? = null,
+        localVideoTitle: String? = null
+    ): String? {
         if (srtText.isBlank()) return null
         var createdFile: File? = null
         var tempFile: File? = null
@@ -85,17 +102,28 @@ class SrtStorage(private val context: Context) {
                 index.optJSONObject(matchedId)?.optString("fileName")?.takeIf { it.isNotBlank() && it != fileName }?.let(oldFiles::add)
                 if (matchedId != id) index.remove(matchedId)
             }
+            val previousEntry = readLibraryIndex().optJSONObject(id)
             index.put(id, JSONObject().apply {
                 put("title", title.ifBlank { "ترجمة محفوظة.srt" })
                 put("fileName", fileName)
                 put("cueCount", cueCount)
                 put("savedAt", System.currentTimeMillis())
-                if (safeSource != null) put("sourceUrl", safeSource)
-                else {
-                    // Keep a previous valid source if this update did not supply one.
-                    val previousSource = readLibraryIndex().optJSONObject(id)?.optString("sourceUrl")
-                    if (!previousSource.isNullOrBlank() && !previousSource.startsWith("local-media://", true)) put("sourceUrl", previousSource)
-                }
+
+                val previousSource = previousEntry?.optString("sourceUrl")?.takeIf { it.isNotBlank() && !it.startsWith("local-media://", true) }
+                val sourceToKeep = safeSource ?: previousSource
+                if (!sourceToKeep.isNullOrBlank()) put("sourceUrl", sourceToKeep)
+
+                val cleanTitle = sourceTitle?.trim()?.takeIf { it.isNotBlank() }
+                    ?: previousEntry?.optString("sourceTitle")?.takeIf { it.isNotBlank() }
+                if (cleanTitle != null) put("sourceTitle", cleanTitle)
+
+                val cleanLocalUri = localVideoUri?.trim()?.takeIf { isLocalVideoUri(it) }
+                    ?: previousEntry?.optString("localVideoUri")?.takeIf { isLocalVideoUri(it) }
+                if (cleanLocalUri != null) put("localVideoUri", cleanLocalUri)
+
+                val cleanLocalTitle = localVideoTitle?.trim()?.takeIf { it.isNotBlank() }
+                    ?: previousEntry?.optString("localVideoTitle")?.takeIf { it.isNotBlank() }
+                if (cleanLocalTitle != null) put("localVideoTitle", cleanLocalTitle)
             })
             if (!writeLibraryIndex(index)) {
                 outputFile.delete()
@@ -126,7 +154,16 @@ class SrtStorage(private val context: Context) {
                 val fileName = entry.optString("fileName")
                 val file = safeSrtFile(fileName) ?: continue
                 if (!file.isFile) continue
-                items += SavedSrtItem(id, entry.optString("title", "ترجمة محفوظة.srt"), entry.optInt("cueCount"), entry.optLong("savedAt"), entry.optString("sourceUrl").takeIf { it.isNotBlank() })
+                items += SavedSrtItem(
+                    id = id,
+                    title = entry.optString("title", "ترجمة محفوظة.srt"),
+                    cueCount = entry.optInt("cueCount"),
+                    savedAt = entry.optLong("savedAt"),
+                    sourceUrl = entry.optString("sourceUrl").takeIf { it.isNotBlank() },
+                    sourceTitle = entry.optString("sourceTitle").takeIf { it.isNotBlank() },
+                    localVideoUri = entry.optString("localVideoUri").takeIf { isLocalVideoUri(it) },
+                    localVideoTitle = entry.optString("localVideoTitle").takeIf { it.isNotBlank() }
+                )
             }
             items.sortedByDescending { it.savedAt }
         } catch (_: Exception) { emptyList() }
@@ -150,6 +187,54 @@ class SrtStorage(private val context: Context) {
             val entry = index.optJSONObject(id) ?: return false
             entry.put("sourceUrl", clean)
             writeLibraryIndex(index)
+        } catch (_: Exception) { false }
+    }
+
+
+    /** Bind a durable local video document URI to an existing library subtitle. */
+    fun bindLocalVideo(id: String, videoUri: String, displayName: String? = null): Boolean {
+        val clean = videoUri.trim()
+        if (!isLocalVideoUri(clean)) return false
+        return try {
+            val index = readLibraryIndex()
+            val entry = index.optJSONObject(id) ?: return false
+            entry.put("localVideoUri", clean)
+            displayName?.trim()?.takeIf { it.isNotBlank() }?.let { entry.put("localVideoTitle", it) }
+            writeLibraryIndex(index)
+        } catch (_: Exception) { false }
+    }
+
+    /** Remove a previously linked local video while keeping the SRT and original URL. */
+    fun unbindLocalVideo(id: String): Boolean {
+        return try {
+            val index = readLibraryIndex()
+            val entry = index.optJSONObject(id) ?: return false
+            entry.remove("localVideoUri")
+            entry.remove("localVideoTitle")
+            writeLibraryIndex(index)
+        } catch (_: Exception) { false }
+    }
+
+    fun libraryItem(id: String): SavedSrtItem? = try {
+        val entry = readLibraryIndex().optJSONObject(id) ?: return null
+        val fileName = entry.optString("fileName")
+        if (safeSrtFile(fileName)?.isFile != true) return null
+        SavedSrtItem(
+            id = id,
+            title = entry.optString("title", "ترجمة محفوظة.srt"),
+            cueCount = entry.optInt("cueCount"),
+            savedAt = entry.optLong("savedAt"),
+            sourceUrl = entry.optString("sourceUrl").takeIf { it.isNotBlank() },
+            sourceTitle = entry.optString("sourceTitle").takeIf { it.isNotBlank() },
+            localVideoUri = entry.optString("localVideoUri").takeIf { isLocalVideoUri(it) },
+            localVideoTitle = entry.optString("localVideoTitle").takeIf { it.isNotBlank() }
+        )
+    } catch (_: Exception) { null }
+
+    private fun isLocalVideoUri(raw: String): Boolean {
+        return try {
+            val uri = Uri.parse(raw)
+            uri.scheme.equals("content", true) || uri.scheme.equals("file", true)
         } catch (_: Exception) { false }
     }
 
