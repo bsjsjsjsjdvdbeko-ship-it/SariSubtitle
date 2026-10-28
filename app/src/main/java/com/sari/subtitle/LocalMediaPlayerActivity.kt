@@ -28,6 +28,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.AspectRatioFrameLayout
 import java.io.File
 import java.io.IOException
 import java.util.Locale
@@ -128,6 +129,9 @@ class LocalMediaPlayerActivity : Activity() {
             playerView.setBackgroundColor(Color.BLACK)
             playerView.keepScreenOn = true
             playerView.useController = false
+            // Explicitly enforce FIT in code as well as XML. This avoids a stale
+            // zoom mode and keeps the entire decoded frame visible after rotation.
+            playerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
             videoSurfaceView = playerView
             playerFrame.addView(playerView, FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -237,6 +241,10 @@ class LocalMediaPlayerActivity : Activity() {
                 val sideInset = insets.systemWindowInsetLeft.coerceAtLeast(insets.systemWindowInsetRight)
                 val edge = if (isFullscreen) 0 else dp(12)
                 view.setPadding(edge + if (isFullscreen) 0 else sideInset, edge, edge + if (isFullscreen) 0 else sideInset, edge + if (isFullscreen) 0 else bottomInset)
+                playerFrame?.post {
+                    fitVideoToContainer()
+                    applyLocalSubtitlePosition()
+                }
                 insets
             }
             root.requestApplyInsets()
@@ -377,6 +385,11 @@ class LocalMediaPlayerActivity : Activity() {
     private fun fitVideoToContainer() {
         val playerView = videoSurfaceView ?: return
         if (playerView.visibility != View.VISIBLE) playerView.visibility = View.VISIBLE
+        // Reapply FIT after fullscreen/inset changes. FIT preserves the full frame;
+        // unlike ZOOM it does not crop heads or edges when aspect ratios differ.
+        playerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+        playerView.requestLayout()
+        playerFrame?.requestLayout()
         // Keep subtitles as a sibling overlay above Media3's video output.
         subtitleView?.bringToFront()
     }
@@ -484,6 +497,10 @@ class LocalMediaPlayerActivity : Activity() {
             if (isFullscreen) 0 else dp(12)
         )
         playerRoot?.requestApplyInsets()
+        playerFrame?.post {
+            fitVideoToContainer()
+            applyLocalSubtitlePosition()
+        }
         if (isFullscreen) {
             window.decorView.systemUiVisibility = (
                 View.SYSTEM_UI_FLAG_FULLSCREEN or
