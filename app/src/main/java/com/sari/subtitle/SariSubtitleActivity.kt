@@ -105,6 +105,10 @@ class SariSubtitleActivity : AppCompatActivity() {
     private var polling = false
     /** Last video-like WebView URL observed by the main-thread poller (covers SPA pushState navigation). */
     private var lastObservedVideoUrl: String? = null
+    /** Identity of the currently visible media item inside an X/YouTube single-page feed. */
+    private var lastObservedFeedVideoIdentity: String? = null
+    /** Canonical X post containing the currently visible feed video, when identifiable. */
+    private var currentFeedPostUrl: String? = null
     private var overlayOn = false
     private var subtitlesVisible = true
     private var dubbingEnabled = false
@@ -438,14 +442,10 @@ class SariSubtitleActivity : AppCompatActivity() {
             webView.loadUrl(sharedUrl)
             statusText.text = "تم استلام رابط مشاركته مع Sari Subtitle. اضغط «إنشاء SRT من رابط» لإنشاء الترجمة العربية."
         } else {
-            // Reopen the last video only when its SRT cache still exists. Otherwise preserve
-            // the normal X landing-page startup behavior.
-            val lastCachedVideo = getPreferences(MODE_PRIVATE)
-                .getString(PREF_LAST_CACHED_VIDEO_URL, null)
-                ?.trim()
-                ?.takeIf { isVideoLikeUrl(it) && storage.has(it) }
-            val startUrl = lastCachedVideo ?: "https://x.com/"
-            urlInput.setText(if (lastCachedVideo != null) lastCachedVideo else "https://x.com/")
+            // Always start on the home page. Cached SRTs remain available when the user
+            // opens their matching post; a previous link must never auto-open on launch.
+            val startUrl = "https://x.com/"
+            urlInput.setText(startUrl)
             webView.loadUrl(startUrl)
         }
     }
@@ -2547,7 +2547,9 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         } catch (_: Exception) { false }
     }
 
-    private fun currentVideoUrlForCache(): String? = webView.url?.trim()?.takeIf { isVideoLikeUrl(it) }
+    private fun currentVideoUrlForCache(): String? =
+        currentFeedPostUrl?.takeIf { isXStatusUrl(it) }
+            ?: webView.url?.trim()?.takeIf { isVideoLikeUrl(it) }
 
     /** Use the current X post URL when the selected-media transcription was launched from an X post;
      * otherwise keep the original local content/file URI. Never create synthetic local-media:// IDs. */
@@ -3226,12 +3228,30 @@ private fun openAudioPicker() {
                 }
                 var t = Number(best.currentTime);
                 var d = Number(best.duration);
+                var postUrl = '';
+                try {
+                  var article = best.closest ? best.closest('article') : null;
+                  if (article) {
+                    var links = Array.from(article.querySelectorAll('a[href]'));
+                    var statusLink = links.find(function(a) {
+                      try { return /\/(?:[^/]+\/)?status\/\d+(?:[/?#]|$)/i.test(new URL(a.href, location.href).pathname); }
+                      catch(e) { return false; }
+                    });
+                    if (statusLink) {
+                      var u = new URL(statusLink.href, location.href);
+                      var match = u.pathname.match(/\/status\/(\d+)/i);
+                      if (match) postUrl = 'https://x.com/i/status/' + match[1];
+                    }
+                  }
+                } catch(e) {}
                 return JSON.stringify({
                   totalVideos: vids.length,
                   currentTime: Number.isFinite(t) ? t : 0,
                   duration: Number.isFinite(d) ? d : 0,
                   paused: !!best.paused,
-                  readyState: best.readyState
+                  readyState: best.readyState,
+                  postUrl: postUrl,
+                  mediaSrc: String(best.currentSrc || best.src || '')
                 });
               } catch(e) { return JSON.stringify({error: String(e)}); }
             })();
@@ -3256,6 +3276,34 @@ private fun openAudioPicker() {
             if (total == 0) {
                 statusText.text = "لا يوجد فيديو — total=0"
                 return
+            }
+            val detectedPostUrl = o.optString("postUrl").trim().takeIf { it.isNotBlank() && isXStatusUrl(it) }
+            val postUrl = detectedPostUrl ?: webView.url?.trim()?.takeIf { isXStatusUrl(it) }
+            currentFeedPostUrl = postUrl
+            val mediaSrc = o.optString("mediaSrc").trim()
+            val feedIdentity = postUrl?.let { VideoUrlIdentity.normalize(it) }
+                ?: mediaSrc.takeIf { it.isNotBlank() }?.let { "media:" + it }
+            if (!feedIdentity.isNullOrBlank() && feedIdentity != lastObservedFeedVideoIdentity) {
+                val previousIdentity = lastObservedFeedVideoIdentity
+                lastObservedFeedVideoIdentity = feedIdentity
+                if (postUrl != null) {
+                    // A feed item changed even when WebView.url stayed on the profile/feed page.
+                    tryAutoLoadSrt(postUrl)
+                    preparePlaybackResume(postUrl)
+                } else if (previousIdentity != null || !lastSrtUrl.isNullOrBlank()) {
+                    // A different media element without a verifiable post ID must never inherit
+                    // the previous video's subtitles.
+                    repo.clear()
+                    repo.offsetMs = settings.offsetMs
+                    lastSrtText = null
+                    lastSrtUrl = null
+                    overlayOn = false
+                    subtitleOverlay.hide()
+                    activePlaybackKey = null
+                    pendingResumePositionMs = 0L
+                    resumePromptShownForKey = null
+                    resumeAppliedForKey = null
+                }
             }
             val t = o.optDouble("currentTime", 0.0)
             val d = o.optDouble("duration", 0.0)
