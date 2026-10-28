@@ -18,12 +18,16 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
-import android.widget.MediaController
-import android.media.MediaPlayer
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
-import android.widget.VideoView
+import android.view.LayoutInflater
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import java.io.File
 import java.io.IOException
 import java.util.Locale
@@ -41,7 +45,8 @@ class LocalMediaPlayerActivity : Activity() {
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private var video: VideoView? = null
+    private var video: ExoPlayer? = null
+    private var videoSurfaceView: PlayerView? = null
     private var subtitleView: TextView? = null
     private var positionView: TextView? = null
     private var seekBar: SeekBar? = null
@@ -115,18 +120,22 @@ class LocalMediaPlayerActivity : Activity() {
             }
             this.playerFrame = playerFrame
 
-            val player = VideoView(this).apply {
-                // VideoView itself extends SurfaceView. Keep a normal opaque view background;
-                // subtitle text is a sibling overlay in playerFrame.
-                setBackgroundColor(Color.BLACK)
-                keepScreenOn = true
-            }
-            video = player
-            normalizeVideoSurface(player)
-            playerFrame.addView(player, FrameLayout.LayoutParams(
+            // Media3 PlayerView + TextureView replaces VideoView's SurfaceView rendering path.
+            // TextureView is configured in local_media_player_view.xml to avoid the black
+            // SurfaceView output seen on the affected device while audio continues.
+            val playerView = LayoutInflater.from(this)
+                .inflate(R.layout.local_media_player_view, playerFrame, false) as PlayerView
+            playerView.setBackgroundColor(Color.BLACK)
+            playerView.keepScreenOn = true
+            playerView.useController = false
+            videoSurfaceView = playerView
+            playerFrame.addView(playerView, FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             ))
+            val player = ExoPlayer.Builder(this).build()
+            video = player
+            playerView.player = player
 
             subtitleView = TextView(this).apply {
                 text = if (cues.isEmpty()) getString(R.string.local_player_no_subtitles) else ""
@@ -158,8 +167,8 @@ class LocalMediaPlayerActivity : Activity() {
 
             root.addView(playerFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             playerFrame.viewTreeObserver.addOnGlobalLayoutListener {
-                // The frame and VideoView use MATCH_PARENT; let Android remeasure the
-                // SurfaceView naturally after rotation/fullscreen/inset changes.
+                // The frame and Media3 PlayerView use MATCH_PARENT; Android remeasures
+                // the texture-backed video output after rotation/fullscreen/inset changes.
                 applyLocalSubtitlePosition()
             }
             playerFrame.post { applyLocalSubtitlePosition() }
@@ -192,7 +201,7 @@ class LocalMediaPlayerActivity : Activity() {
                         val duration = safeDuration()
                         if (duration > 0) {
                             val target = (duration.toLong() * (bar?.progress ?: 0) / 1000L).toInt()
-                            runCatching { video?.seekTo(target) }
+                            runCatching { video?.seekTo(target.toLong()) }
                         }
                         userSeeking = false
                     }
@@ -235,57 +244,60 @@ class LocalMediaPlayerActivity : Activity() {
                 toggleFullscreen()
             }
 
-            player.setMediaController(MediaController(this))
-            player.setOnPreparedListener { mediaPlayer ->
-                try {
-                    prepared = true
-                    mediaPlayer.isLooping = false
-                    videoContentWidth = mediaPlayer.videoWidth
-                    videoContentHeight = mediaPlayer.videoHeight
-                    mediaPlayer.setOnVideoSizeChangedListener { _, width, height ->
-                        videoContentWidth = width
-                        videoContentHeight = height
-                        // The view is MATCH_PARENT; Android handles surface geometry on resize.
+            player.addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    when (playbackState) {
+                        Player.STATE_READY -> {
+                            try {
+                                prepared = true
+                                videoContentWidth = 0
+                                videoContentHeight = 0
+                                seekBar?.isEnabled = true
+                                maybeOfferResume(player, uri.toString())
+                                if (!resumeApplied) player.play()
+                                startSubtitleTicker()
+                                playerFrame?.post { applyLocalSubtitlePosition() }
+                            } catch (error: Exception) {
+                                android.util.Log.e("SariMyFiles", "Player start failed", error)
+                                showOpenError(getString(R.string.local_player_play_failed))
+                            }
+                        }
+                        Player.STATE_ENDED -> {
+                            playbackSourceKey?.let(playbackStore::clearByKey)
+                            stopSubtitleTicker()
+                            renderSubtitle(Long.MAX_VALUE)
+                            updateTimeline()
+                        }
                     }
-                    // VideoView is the SurfaceView. Avoid repeatedly replacing its layout
-                    // params while the media surface is being prepared.
-                    playerFrame?.post { applyLocalSubtitlePosition() }
-                    seekBar?.isEnabled = true
-                    maybeOfferResume(player, uri.toString())
-                    if (!resumeApplied) {
-                        player.start()
-                    }
-                    startSubtitleTicker()
-                } catch (error: Exception) {
-                    android.util.Log.e("SariMyFiles", "Player start failed", error)
-                    showOpenError(getString(R.string.local_player_play_failed))
                 }
-            }
-            player.setOnCompletionListener {
-                playbackSourceKey?.let(playbackStore::clearByKey)
-                stopSubtitleTicker()
-                renderSubtitle(Long.MAX_VALUE)
-                updateTimeline()
-            }
-            player.setOnErrorListener { _, what, extra ->
-                android.util.Log.w("SariMyFiles", "Video playback error what=$what extra=$extra")
-                // Some document providers expose streams that MediaPlayer cannot read directly.
-                if (uri.scheme == "content" && cachedFile == null) {
-                    try {
-                        val copy = copyContentUriToCache(uri)
-                        cachedFile = copy
-                        prepared = false
-                        player.setVideoURI(Uri.fromFile(copy))
-                    } catch (error: Exception) {
-                        android.util.Log.e("SariMyFiles", "Failed to recover content URI", error)
-                        showOpenError(getString(R.string.local_player_video_failed))
-                    }
-                } else {
-                    showOpenError(getString(R.string.local_player_unsupported))
+
+                override fun onVideoSizeChanged(videoSize: VideoSize) {
+                    videoContentWidth = videoSize.width
+                    videoContentHeight = videoSize.height
+                    videoSurfaceView?.requestLayout()
                 }
-                true
-            }
-            player.setVideoURI(uri)
+
+                override fun onPlayerError(error: PlaybackException) {
+                    android.util.Log.w("SariMyFiles", "Media3 playback error", error)
+                    if (uri.scheme == "content" && cachedFile == null) {
+                        try {
+                            val copy = copyContentUriToCache(uri)
+                            cachedFile = copy
+                            prepared = false
+                            player.setMediaItem(MediaItem.fromUri(Uri.fromFile(copy)))
+                            player.prepare()
+                            player.playWhenReady = true
+                        } catch (copyError: Exception) {
+                            android.util.Log.e("SariMyFiles", "Failed to recover content URI", copyError)
+                            showOpenError(getString(R.string.local_player_video_failed))
+                        }
+                    } else {
+                        showOpenError(getString(R.string.local_player_unsupported))
+                    }
+                }
+            })
+            player.setMediaItem(MediaItem.fromUri(uri))
+            player.prepare()
         } catch (error: Exception) {
             android.util.Log.e("SariMyFiles", "Failed to initialize local media player", error)
             showOpenError(getString(R.string.local_player_init_failed))
@@ -359,26 +371,23 @@ class LocalMediaPlayerActivity : Activity() {
     }
 
     /**
-     * VideoView extends SurfaceView directly; it does not contain an internal SurfaceView.
-     * Its layout is MATCH_PARENT from creation, so do not reassign layout params or apply
-     * transforms on every global-layout callback. Those operations can churn/recreate the
-     * surface and make audio continue while the picture remains black on some devices.
-     * Android remeasures the surface naturally when the frame changes size.
+     * Keep the Media3 PlayerView filling its container. TextureView rendering is configured
+     * in the dedicated layout resource; only update visibility and subtitle stacking here.
      */
     private fun fitVideoToContainer() {
-        val player = video ?: return
-        if (player.visibility != View.VISIBLE) player.visibility = View.VISIBLE
-        // Keep the subtitle overlay above the VideoView in the normal sibling hierarchy.
+        val playerView = videoSurfaceView ?: return
+        if (playerView.visibility != View.VISIBLE) playerView.visibility = View.VISIBLE
+        // Keep subtitles as a sibling overlay above Media3's video output.
         subtitleView?.bringToFront()
     }
 
-    private fun maybeOfferResume(player: VideoView, source: String) {
+    private fun maybeOfferResume(player: ExoPlayer, source: String) {
         if (resumePromptShown || resumeApplied) return
         val record = playbackStore.get(source) ?: run {
             resumeApplied = true
             return
         }
-        val duration = runCatching { player.duration.toLong() }.getOrDefault(0L)
+        val duration = runCatching { player.duration }.getOrDefault(0L)
         val position = record.positionMs
         if (position < 5_000L || (duration > 0L && position >= duration - 5_000L)) {
             playbackStore.clear(source)
@@ -393,8 +402,8 @@ class LocalMediaPlayerActivity : Activity() {
             .setNegativeButton("بدء من البداية") { _, _ ->
                 playbackStore.clear(source)
                 resumeApplied = true
-                runCatching { player.seekTo(0) }
-                player.start()
+                runCatching { player.seekTo(0L) }
+                player.play()
                 renderSubtitle(0L)
                 updateTimeline(0)
                 startSubtitleTicker()
@@ -402,15 +411,15 @@ class LocalMediaPlayerActivity : Activity() {
             .setPositiveButton("استئناف") { _, _ ->
                 resumeApplied = true
                 val target = if (duration > 0L) position.coerceIn(0L, (duration - 1000L).coerceAtLeast(0L)) else position
-                runCatching { player.seekTo(target.toInt()) }
+                runCatching { player.seekTo(target) }
                 renderSubtitle(target)
                 updateTimeline(target.toInt())
-                player.start()
+                player.play()
                 startSubtitleTicker()
             }
             .setOnCancelListener {
                 resumeApplied = true
-                player.start()
+                player.play()
                 startSubtitleTicker()
             }
             .show()
@@ -419,8 +428,8 @@ class LocalMediaPlayerActivity : Activity() {
     private fun savePlaybackPosition() {
         if (!::playbackStore.isInitialized) return
         val sourceKey = playbackSourceKey ?: return
-        val position = runCatching { video?.currentPosition?.toLong() ?: 0L }.getOrDefault(0L)
-        val duration = runCatching { video?.duration?.toLong() ?: 0L }.getOrDefault(0L)
+        val position = runCatching { video?.currentPosition ?: 0L }.getOrDefault(0L)
+        val duration = runCatching { video?.duration ?: 0L }.getOrDefault(0L)
         playbackStore.saveByKey(sourceKey, position, duration)
     }
 
@@ -562,16 +571,16 @@ class LocalMediaPlayerActivity : Activity() {
         return out
     }
 
-    private fun safeDuration(): Int = runCatching { video?.duration ?: 0 }.getOrDefault(0).coerceAtLeast(0)
+    private fun safeDuration(): Int = runCatching { (video?.duration ?: 0L).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt() }.getOrDefault(0).coerceAtLeast(0)
 
     private fun safeSeek(delta: Int) {
         try {
             val v = video ?: return
             if (!prepared) return
             val duration = safeDuration()
-            val current = v.currentPosition.coerceAtLeast(0)
+            val current = v.currentPosition.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
             val target = (current.toLong() + delta).coerceIn(0L, if (duration > 0) duration.toLong() else Int.MAX_VALUE.toLong()).toInt()
-            v.seekTo(target)
+            v.seekTo(target.toLong())
             renderSubtitle(target.toLong())
             updateTimeline()
         } catch (_: Exception) {
@@ -583,7 +592,7 @@ class LocalMediaPlayerActivity : Activity() {
         try {
             val v = video ?: return
             if (!prepared) return
-            if (v.isPlaying) v.pause() else v.start()
+            if (v.isPlaying) v.pause() else v.play()
             if (v.isPlaying) startSubtitleTicker() else stopSubtitleTicker()
         } catch (error: Exception) {
             android.util.Log.w("SariMyFiles", "Play/pause failed", error)
@@ -603,7 +612,7 @@ class LocalMediaPlayerActivity : Activity() {
                 val v = video
                 if (v == null || isFinishing || isDestroyed || !prepared) return
                 try {
-                    val position = v.currentPosition.coerceAtLeast(0)
+                    val position = v.currentPosition.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
                     renderSubtitle(position.toLong())
                     updateTimeline(position)
                     val now = System.currentTimeMillis()
@@ -640,7 +649,7 @@ class LocalMediaPlayerActivity : Activity() {
 
     private fun updateTimeline(positionOverride: Int? = null) {
         val duration = safeDuration()
-        val position = (positionOverride ?: runCatching { video?.currentPosition ?: 0 }.getOrDefault(0)).coerceAtLeast(0)
+        val position = (positionOverride ?: runCatching { (video?.currentPosition ?: 0L).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt() }.getOrDefault(0)).coerceAtLeast(0)
         positionView?.text = "${formatTime(position)} / ${formatTime(duration)}"
         if (!userSeeking && duration > 0) {
             seekBar?.progress = ((position.toLong() * 1000L) / duration).toInt().coerceIn(0, 1000)
@@ -705,15 +714,7 @@ class LocalMediaPlayerActivity : Activity() {
     override fun onDestroy() {
         savePlaybackPosition()
         stopSubtitleTicker()
-        try { video?.stopPlayback() } catch (_: Exception) {}
+        try { videoSurfaceView?.player = null; video?.release(); video = null } catch (_: Exception) {}
         try { cachedFile?.delete() } catch (_: Exception) {}
         super.onDestroy()
-    }
-}    /**
-     * VideoView is itself a SurfaceView, not a ViewGroup containing another surface.
-     * Only restore its visibility; do not change SurfaceHolder format or Z-order here.
-     */
-    private fun normalizeVideoSurface(player: VideoView) {
-        player.visibility = View.VISIBLE
-        player.alpha = 1f
     }
