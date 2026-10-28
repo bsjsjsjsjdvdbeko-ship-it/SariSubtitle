@@ -718,4 +718,3 @@ class LocalMediaPlayerActivity : Activity() {
         try { cachedFile?.delete() } catch (_: Exception) {}
         super.onDestroy()
     }
-}
