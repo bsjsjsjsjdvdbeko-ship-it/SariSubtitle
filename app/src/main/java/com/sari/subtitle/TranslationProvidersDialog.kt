@@ -1,5 +1,6 @@
 package com.sari.subtitle
 
+import com.sari.subtitle.v2.R
 import android.app.AlertDialog
 import android.content.Context
 import android.graphics.Color

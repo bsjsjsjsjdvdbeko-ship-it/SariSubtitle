@@ -10,9 +10,11 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.MediaController
@@ -61,6 +63,11 @@ class LocalMediaPlayerActivity : Activity() {
     private var positionControlsView: View? = null
     private var seekControlsView: View? = null
     private var playbackControlsView: View? = null
+    private var playerFrame: FrameLayout? = null
+    private var dragSubtitle = false
+    private var dragStartRawY = 0f
+    private var dragStartViewY = 0f
+    private var dragTouchSlop = 0f
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -94,9 +101,24 @@ class LocalMediaPlayerActivity : Activity() {
             }
             root.addView(titleView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-            val player = VideoView(this)
+            // The video and subtitle must share the same FrameLayout so the subtitle
+            // can be dragged vertically over the video and fullscreen can leave only
+            // the video + subtitle visible.
+            val playerFrame = FrameLayout(this).apply {
+                setBackgroundColor(0xFF000000.toInt())
+                clipChildren = true
+                clipToPadding = true
+            }
+            this.playerFrame = playerFrame
+
+            val player = VideoView(this).apply {
+                setBackgroundColor(0xFF000000.toInt())
+            }
             video = player
-            root.addView(player, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            playerFrame.addView(player, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            ))
 
             subtitleView = TextView(this).apply {
                 text = if (cues.isEmpty()) getString(R.string.local_player_no_subtitles) else ""
@@ -106,14 +128,35 @@ class LocalMediaPlayerActivity : Activity() {
                 gravity = Gravity.CENTER
                 textAlignment = View.TEXT_ALIGNMENT_CENTER
                 setHorizontallyScrolling(false)
-                setPadding(dp(12), dp(12), dp(12), dp(12))
+                maxLines = 8
+                setPadding(dp(12), dp(10), dp(12), dp(10))
                 setShadowLayer(dp(6).toFloat(), 0f, dp(2).toFloat(), 0xFF000000.toInt())
                 textDirection = View.TEXT_DIRECTION_FIRST_STRONG
                 setLineSpacing(dp(2).toFloat(), 1.05f)
+                isClickable = true
+                isFocusable = false
             }
-            root.addView(subtitleView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                topMargin = dp(8)
-            })
+            val subtitleLp = FrameLayout.LayoutParams(
+                (resources.displayMetrics.widthPixels * 0.92f).toInt().coerceAtLeast(dp(120)),
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                leftMargin = dp(12)
+                rightMargin = dp(12)
+            }
+            playerFrame.addView(subtitleView, subtitleLp)
+            dragTouchSlop = resources.displayMetrics.density * 8f
+            subtitleView?.setOnTouchListener { view, event -> handleLocalSubtitleDrag(view, event) }
+
+            root.addView(playerFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            playerFrame.viewTreeObserver.addOnGlobalLayoutListener {
+                fitVideoToContainer()
+                applyLocalSubtitlePosition()
+            }
+            playerFrame.post {
+                fitVideoToContainer()
+                applyLocalSubtitlePosition()
+            }
 
             positionView = TextView(this).apply {
                 text = "00:00 / 00:00"
@@ -174,6 +217,14 @@ class LocalMediaPlayerActivity : Activity() {
             root.addView(controlsScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             playerRoot = root
             setContentView(root)
+            root.setOnApplyWindowInsetsListener { view, insets ->
+                val bottomInset = insets.systemWindowInsetBottom
+                val sideInset = insets.systemWindowInsetLeft.coerceAtLeast(insets.systemWindowInsetRight)
+                val edge = if (isFullscreen) 0 else dp(12)
+                view.setPadding(edge + if (isFullscreen) 0 else sideInset, edge, edge + if (isFullscreen) 0 else sideInset, edge + if (isFullscreen) 0 else bottomInset)
+                insets
+            }
+            root.requestApplyInsets()
             if (savedInstanceState?.getBoolean(STATE_FULLSCREEN, false) == true) {
                 toggleFullscreen()
             }
@@ -183,6 +234,11 @@ class LocalMediaPlayerActivity : Activity() {
                 try {
                     prepared = true
                     mediaPlayer.isLooping = false
+                    fitVideoToContainer()
+                    playerFrame?.post {
+                        fitVideoToContainer()
+                        applyLocalSubtitlePosition()
+                    }
                     seekBar?.isEnabled = true
                     maybeOfferResume(player, uri.toString())
                     if (!resumeApplied) {
@@ -223,6 +279,95 @@ class LocalMediaPlayerActivity : Activity() {
             android.util.Log.e("SariMyFiles", "Failed to initialize local media player", error)
             showOpenError(getString(R.string.local_player_init_failed))
         }
+    }
+
+    private fun handleLocalSubtitleDrag(view: View, event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                dragSubtitle = false
+                dragStartRawY = event.rawY
+                dragStartViewY = view.y
+                playerFrame?.requestDisallowInterceptTouchEvent(true)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dy = event.rawY - dragStartRawY
+                if (!dragSubtitle && kotlin.math.abs(dy) > dragTouchSlop) {
+                    dragSubtitle = true
+                }
+                if (dragSubtitle) {
+                    moveLocalSubtitleTo(dragStartViewY + dy)
+                }
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (dragSubtitle) {
+                    persistLocalSubtitlePosition()
+                }
+                playerFrame?.requestDisallowInterceptTouchEvent(false)
+                dragSubtitle = false
+                return true
+            }
+        }
+        return true
+    }
+
+    private fun moveLocalSubtitleTo(rawY: Float) {
+        val frame = playerFrame ?: return
+        val subtitle = subtitleView ?: return
+        val maxY = (frame.height - subtitle.height).coerceAtLeast(0)
+        val clampedY = rawY.coerceIn(0f, maxY.toFloat())
+        subtitle.x = ((frame.width - subtitle.width) / 2f).coerceAtLeast(0f)
+        subtitle.y = clampedY
+    }
+
+    private fun persistLocalSubtitlePosition() {
+        val frame = playerFrame ?: return
+        val subtitle = subtitleView ?: return
+        val maxY = (frame.height - subtitle.height).coerceAtLeast(1)
+        subtitleSettings.subtitleDragX = 0.5f
+        subtitleSettings.subtitleDragY = (subtitle.y / maxY).coerceIn(0f, 1f)
+        subtitleSettings.hasCustomSubtitlePosition = true
+    }
+
+    private fun applyLocalSubtitlePosition() {
+        val frame = playerFrame ?: return
+        val subtitle = subtitleView ?: return
+        if (frame.width <= 0 || frame.height <= 0 || subtitle.width <= 0 || subtitle.height <= 0) {
+            frame.post { applyLocalSubtitlePosition() }
+            return
+        }
+        subtitle.x = ((frame.width - subtitle.width) / 2f).coerceAtLeast(0f)
+        val maxY = (frame.height - subtitle.height).coerceAtLeast(0)
+        val y = if (subtitleSettings.hasCustomSubtitlePosition) {
+            maxY * subtitleSettings.subtitleDragY
+        } else {
+            (maxY - dp(42)).coerceAtLeast(0).toFloat()
+        }
+        moveLocalSubtitleTo(y)
+    }
+
+    private fun fitVideoToContainer() {
+        val player = video ?: return
+        val frame = playerFrame ?: return
+        val videoWidth = runCatching { player.videoWidth }.getOrDefault(0)
+        val videoHeight = runCatching { player.videoHeight }.getOrDefault(0)
+        if (videoWidth <= 0 || videoHeight <= 0 || frame.width <= 0 || frame.height <= 0) return
+
+        // VideoView remains MATCH_PARENT. Scale the SurfaceView uniformly enough to
+        // cover the entire container (CENTER_CROP behavior), avoiding a small video
+        // stuck in one corner when the device changes to landscape.
+        val containerRatio = frame.width.toFloat() / frame.height.toFloat()
+        val videoRatio = videoWidth.toFloat() / videoHeight.toFloat()
+        if (videoRatio > containerRatio) {
+            player.scaleX = (videoRatio / containerRatio).coerceAtLeast(1f)
+            player.scaleY = 1f
+        } else {
+            player.scaleX = 1f
+            player.scaleY = (containerRatio / videoRatio).coerceAtLeast(1f)
+        }
+        player.pivotX = frame.width / 2f
+        player.pivotY = frame.height / 2f
     }
 
     private fun maybeOfferResume(player: VideoView, source: String) {
@@ -327,6 +472,7 @@ class LocalMediaPlayerActivity : Activity() {
             if (isFullscreen) 0 else dp(12),
             if (isFullscreen) 0 else dp(12)
         )
+        playerRoot?.requestApplyInsets()
         if (isFullscreen) {
             window.decorView.systemUiVisibility = (
                 View.SYSTEM_UI_FLAG_FULLSCREEN or
@@ -369,6 +515,11 @@ class LocalMediaPlayerActivity : Activity() {
         playbackControlsView?.visibility = View.VISIBLE
         playerRoot?.setPadding(dp(12), dp(12), dp(12), dp(12))
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        playerRoot?.requestApplyInsets()
+        playerFrame?.post {
+            fitVideoToContainer()
+            applyLocalSubtitlePosition()
+        }
         return true
     }
 
@@ -513,6 +664,20 @@ class LocalMediaPlayerActivity : Activity() {
             if (!isFinishing) finish()
         } catch (error: Exception) {
             android.util.Log.e("SariMyFiles", "Unable to close failed local player", error)
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && isFullscreen) {
+            window.decorView.systemUiVisibility = (
+                View.SYSTEM_UI_FLAG_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            )
         }
     }
 
