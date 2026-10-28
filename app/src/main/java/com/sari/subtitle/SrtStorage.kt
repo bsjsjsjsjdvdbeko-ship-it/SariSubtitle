@@ -217,21 +217,23 @@ class SrtStorage(private val context: Context) {
 
     fun libraryItem(id: String): SavedSrtItem? {
         return try {
-        val entry = readLibraryIndex().optJSONObject(id) ?: return null
-        val fileName = entry.optString("fileName")
-        if (safeSrtFile(fileName)?.isFile != true) return null
-        SavedSrtItem(
-            id = id,
-            title = entry.optString("title", "ترجمة محفوظة.srt"),
-            cueCount = entry.optInt("cueCount"),
-            savedAt = entry.optLong("savedAt"),
-            sourceUrl = entry.optString("sourceUrl").takeIf { it.isNotBlank() },
-            sourceTitle = entry.optString("sourceTitle").takeIf { it.isNotBlank() },
-            localVideoUri = entry.optString("localVideoUri").takeIf { isLocalVideoUri(it) },
-            localVideoTitle = entry.optString("localVideoTitle").takeIf { it.isNotBlank() }
-        )
-    } catch (_: Exception) { null }
-}
+            val entry = readLibraryIndex().optJSONObject(id) ?: return null
+            val fileName = entry.optString("fileName")
+            if (safeSrtFile(fileName)?.isFile != true) return null
+            SavedSrtItem(
+                id = id,
+                title = entry.optString("title", "ترجمة محفوظة.srt"),
+                cueCount = entry.optInt("cueCount"),
+                savedAt = entry.optLong("savedAt"),
+                sourceUrl = entry.optString("sourceUrl").takeIf { it.isNotBlank() },
+                sourceTitle = entry.optString("sourceTitle").takeIf { it.isNotBlank() },
+                localVideoUri = entry.optString("localVideoUri").takeIf { isLocalVideoUri(it) },
+                localVideoTitle = entry.optString("localVideoTitle").takeIf { it.isNotBlank() }
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     private fun isLocalVideoUri(raw: String): Boolean {
         return try {

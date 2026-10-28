@@ -104,7 +104,10 @@ class LocalMediaPlayerActivity : Activity() {
                 setTextColor(0xFFFFFFFF.toInt())
                 setBackgroundColor(0xCC171B2D.toInt())
                 gravity = Gravity.CENTER
+                textAlignment = View.TEXT_ALIGNMENT_CENTER
+                setHorizontallyScrolling(false)
                 setPadding(dp(12), dp(12), dp(12), dp(12))
+                setShadowLayer(dp(6).toFloat(), 0f, dp(2).toFloat(), 0xFF000000.toInt())
                 textDirection = View.TEXT_DIRECTION_FIRST_STRONG
                 setLineSpacing(dp(2).toFloat(), 1.05f)
             }
@@ -378,7 +381,18 @@ class LocalMediaPlayerActivity : Activity() {
     private fun controlButton(label: String, action: () -> Unit) = Button(this).apply {
         setText(label)
         isAllCaps = false
-        setPadding(dp(4), 0, dp(4), 0)
+        setTextColor(0xFFFFFFFF.toInt())
+        setBackgroundColor(0xFF1A2140.toInt())
+        setPadding(dp(10), 0, dp(10), 0)
+        minHeight = dp(44)
+        minWidth = 0
+        stateListAnimator = null
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            dp(44)
+        ).apply {
+            setMargins(dp(4), dp(4), dp(4), dp(4))
+        }
         setOnClickListener { action() }
     }
 
