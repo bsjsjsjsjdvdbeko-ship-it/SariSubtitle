@@ -363,18 +363,26 @@ class LocalMediaPlayerActivity : Activity() {
         val frame = playerFrame ?: return
         if (frame.width <= 0 || frame.height <= 0) return
 
-        // Keep VideoView itself MATCH_PARENT and let its internal SurfaceView/MediaPlayer
-        // perform the normal video layout. Do not scale the VideoView with scaleX/scaleY:
-        // scaling the VideoView can move/clip its SurfaceView and result in audio-only
-        // playback on some Android devices/document providers.
+        // VideoView uses an internal SurfaceView. Keep its geometry completely
+        // untransformed; changing scale/translation or z-order here can make the
+        // SurfaceView render black while audio continues normally on some devices.
+        val lp = player.layoutParams as? FrameLayout.LayoutParams
+            ?: FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        lp.width = ViewGroup.LayoutParams.MATCH_PARENT
+        lp.height = ViewGroup.LayoutParams.MATCH_PARENT
+        lp.gravity = Gravity.CENTER
+        player.layoutParams = lp
         player.scaleX = 1f
         player.scaleY = 1f
-        player.pivotX = frame.width / 2f
-        player.pivotY = frame.height / 2f
         player.translationX = 0f
         player.translationY = 0f
         player.visibility = View.VISIBLE
-        player.bringToFront()
+        player.requestLayout()
+        // Keep the subtitle above the VideoView in the normal view hierarchy.
+        // Do NOT bring the VideoView itself to front because it owns a SurfaceView.
         subtitleView?.bringToFront()
     }
 
