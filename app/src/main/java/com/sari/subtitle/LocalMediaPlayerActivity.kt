@@ -14,6 +14,8 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.SurfaceView
+import android.graphics.PixelFormat
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -116,9 +118,13 @@ class LocalMediaPlayerActivity : Activity() {
             this.playerFrame = playerFrame
 
             val player = VideoView(this).apply {
-                setBackgroundColor(0xFF000000.toInt())
+                // The SurfaceView owns a separate compositor layer. Keep the VideoView
+                // itself transparent and the video surface below subtitle overlays.
+                setBackgroundColor(Color.TRANSPARENT)
+                keepScreenOn = true
             }
             video = player
+            normalizeVideoSurface(player)
             playerFrame.addView(player, FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -155,6 +161,7 @@ class LocalMediaPlayerActivity : Activity() {
             root.addView(playerFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             playerFrame.viewTreeObserver.addOnGlobalLayoutListener {
                 fitVideoToContainer()
+                normalizeVideoSurface(player)
                 applyLocalSubtitlePosition()
             }
             playerFrame.post {
@@ -245,8 +252,10 @@ class LocalMediaPlayerActivity : Activity() {
                         videoContentHeight = height
                         playerFrame?.post { fitVideoToContainer() }
                     }
+                    normalizeVideoSurface(player)
                     fitVideoToContainer()
                     playerFrame?.post {
+                        normalizeVideoSurface(player)
                         fitVideoToContainer()
                         applyLocalSubtitlePosition()
                     }
@@ -381,8 +390,9 @@ class LocalMediaPlayerActivity : Activity() {
         player.translationY = 0f
         player.visibility = View.VISIBLE
         player.requestLayout()
-        // Keep the subtitle above the VideoView in the normal view hierarchy.
-        // Do NOT bring the VideoView itself to front because it owns a SurfaceView.
+        // Reassert the SurfaceView's normal compositor ordering after geometry changes.
+        normalizeVideoSurface(player)
+        // Keep subtitle overlay above the player; never move the SurfaceView itself.
         subtitleView?.bringToFront()
     }
 
@@ -723,4 +733,32 @@ class LocalMediaPlayerActivity : Activity() {
         try { cachedFile?.delete() } catch (_: Exception) {}
         super.onDestroy()
     }
-}
+}    /**
+     * VideoView embeds a SurfaceView. On some OEM builds the surface can retain an
+     * unexpected overlay/Z-order after the activity is rebuilt or rotated, resulting
+     * in audio and controls with a black picture. Normalize the real child surface
+     * without applying transforms to it (transforms can detach/blacken SurfaceView).
+     */
+    private fun normalizeVideoSurface(player: VideoView) {
+        player.setBackgroundColor(Color.TRANSPARENT)
+        player.alpha = 1f
+        player.visibility = View.VISIBLE
+        player.isEnabled = true
+        fun visit(group: ViewGroup) {
+            for (i in 0 until group.childCount) {
+                val child = group.getChildAt(i)
+                if (child is SurfaceView) {
+                    child.visibility = View.VISIBLE
+                    child.alpha = 1f
+                    child.setZOrderOnTop(false)
+                    child.setZOrderMediaOverlay(false)
+                    runCatching { child.holder.setFormat(PixelFormat.OPAQUE) }
+                } else if (child is ViewGroup) {
+                    visit(child)
+                }
+            }
+        }
+        visit(player)
+    }
+
+
