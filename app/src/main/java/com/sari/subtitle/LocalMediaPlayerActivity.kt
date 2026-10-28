@@ -14,8 +14,6 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.view.SurfaceView
-import android.graphics.PixelFormat
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -118,9 +116,9 @@ class LocalMediaPlayerActivity : Activity() {
             this.playerFrame = playerFrame
 
             val player = VideoView(this).apply {
-                // The SurfaceView owns a separate compositor layer. Keep the VideoView
-                // itself transparent and the video surface below subtitle overlays.
-                setBackgroundColor(Color.TRANSPARENT)
+                // VideoView itself extends SurfaceView. Keep a normal opaque view background;
+                // subtitle text is a sibling overlay in playerFrame.
+                setBackgroundColor(Color.BLACK)
                 keepScreenOn = true
             }
             video = player
@@ -160,14 +158,11 @@ class LocalMediaPlayerActivity : Activity() {
 
             root.addView(playerFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             playerFrame.viewTreeObserver.addOnGlobalLayoutListener {
-                fitVideoToContainer()
-                normalizeVideoSurface(player)
+                // The frame and VideoView use MATCH_PARENT; let Android remeasure the
+                // SurfaceView naturally after rotation/fullscreen/inset changes.
                 applyLocalSubtitlePosition()
             }
-            playerFrame.post {
-                fitVideoToContainer()
-                applyLocalSubtitlePosition()
-            }
+            playerFrame.post { applyLocalSubtitlePosition() }
 
             positionView = TextView(this).apply {
                 text = "00:00 / 00:00"
@@ -250,15 +245,11 @@ class LocalMediaPlayerActivity : Activity() {
                     mediaPlayer.setOnVideoSizeChangedListener { _, width, height ->
                         videoContentWidth = width
                         videoContentHeight = height
-                        playerFrame?.post { fitVideoToContainer() }
+                        // The view is MATCH_PARENT; Android handles surface geometry on resize.
                     }
-                    normalizeVideoSurface(player)
-                    fitVideoToContainer()
-                    playerFrame?.post {
-                        normalizeVideoSurface(player)
-                        fitVideoToContainer()
-                        applyLocalSubtitlePosition()
-                    }
+                    // VideoView is the SurfaceView. Avoid repeatedly replacing its layout
+                    // params while the media surface is being prepared.
+                    playerFrame?.post { applyLocalSubtitlePosition() }
                     seekBar?.isEnabled = true
                     maybeOfferResume(player, uri.toString())
                     if (!resumeApplied) {
@@ -367,32 +358,17 @@ class LocalMediaPlayerActivity : Activity() {
         moveLocalSubtitleTo(y)
     }
 
+    /**
+     * VideoView extends SurfaceView directly; it does not contain an internal SurfaceView.
+     * Its layout is MATCH_PARENT from creation, so do not reassign layout params or apply
+     * transforms on every global-layout callback. Those operations can churn/recreate the
+     * surface and make audio continue while the picture remains black on some devices.
+     * Android remeasures the surface naturally when the frame changes size.
+     */
     private fun fitVideoToContainer() {
         val player = video ?: return
-        val frame = playerFrame ?: return
-        if (frame.width <= 0 || frame.height <= 0) return
-
-        // VideoView uses an internal SurfaceView. Keep its geometry completely
-        // untransformed; changing scale/translation or z-order here can make the
-        // SurfaceView render black while audio continues normally on some devices.
-        val lp = player.layoutParams as? FrameLayout.LayoutParams
-            ?: FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        lp.width = ViewGroup.LayoutParams.MATCH_PARENT
-        lp.height = ViewGroup.LayoutParams.MATCH_PARENT
-        lp.gravity = Gravity.CENTER
-        player.layoutParams = lp
-        player.scaleX = 1f
-        player.scaleY = 1f
-        player.translationX = 0f
-        player.translationY = 0f
-        player.visibility = View.VISIBLE
-        player.requestLayout()
-        // Reassert the SurfaceView's normal compositor ordering after geometry changes.
-        normalizeVideoSurface(player)
-        // Keep subtitle overlay above the player; never move the SurfaceView itself.
+        if (player.visibility != View.VISIBLE) player.visibility = View.VISIBLE
+        // Keep the subtitle overlay above the VideoView in the normal sibling hierarchy.
         subtitleView?.bringToFront()
     }
 
@@ -734,31 +710,10 @@ class LocalMediaPlayerActivity : Activity() {
         super.onDestroy()
     }
 }    /**
-     * VideoView embeds a SurfaceView. On some OEM builds the surface can retain an
-     * unexpected overlay/Z-order after the activity is rebuilt or rotated, resulting
-     * in audio and controls with a black picture. Normalize the real child surface
-     * without applying transforms to it (transforms can detach/blacken SurfaceView).
+     * VideoView is itself a SurfaceView, not a ViewGroup containing another surface.
+     * Only restore its visibility; do not change SurfaceHolder format or Z-order here.
      */
     private fun normalizeVideoSurface(player: VideoView) {
-        player.setBackgroundColor(Color.TRANSPARENT)
-        player.alpha = 1f
         player.visibility = View.VISIBLE
-        player.isEnabled = true
-        fun visit(group: ViewGroup) {
-            for (i in 0 until group.childCount) {
-                val child = group.getChildAt(i)
-                if (child is SurfaceView) {
-                    child.visibility = View.VISIBLE
-                    child.alpha = 1f
-                    child.setZOrderOnTop(false)
-                    child.setZOrderMediaOverlay(false)
-                    runCatching { child.holder.setFormat(PixelFormat.OPAQUE) }
-                } else if (child is ViewGroup) {
-                    visit(child)
-                }
-            }
-        }
-        visit(player)
+        player.alpha = 1f
     }
-
-
