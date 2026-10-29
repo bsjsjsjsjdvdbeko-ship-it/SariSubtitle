@@ -11,6 +11,11 @@ import java.net.URL
 
 /** Text-only OmniRoute gateway client. It never receives audio or SRT timestamps. */
 class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
+    companion object {
+        /** Fixed, user-verified translation model; never fall back to OmniRoute auto routing. */
+        const val FIXED_TRANSLATION_MODEL = "xkiro/qwen/qwen3-vl-plus:free"
+    }
+
     fun translateBatch(
         texts: List<String>,
         sourceLang: String,
@@ -34,9 +39,12 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
             Input JSON array:
             $input
         """.trimIndent()
+        // A deliberate model override is used only for explicit Gemini fallback calls.
+        // The primary OmniRoute path is pinned to the user-verified xKiro/Qwen model.
+        val selectedModel = modelOverride?.trim()?.takeIf { it.isNotBlank() && !it.equals("auto", true) }
+            ?: FIXED_TRANSLATION_MODEL
         val payload = JSONObject()
-            .put("model", modelOverride?.trim()?.takeIf { it.isNotBlank() }
-                ?: settings.omniRouteTextModel.trim().ifBlank { "auto" })
+            .put("model", selectedModel)
             .put("messages", JSONArray()
                 .put(JSONObject().put("role", "system").put("content", "You are a careful subtitle translator. Output only the requested JSON."))
                 .put(JSONObject().put("role", "user").put("content", prompt)))

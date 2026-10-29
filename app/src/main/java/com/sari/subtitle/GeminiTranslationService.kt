@@ -11,7 +11,7 @@ import java.net.URL
 /** ترجمة نصوص SRT عبر Gemini؛ يرسل النص فقط ولا يرسل الصوت أو توقيتات الفيديو. */
 object GeminiTranslationService {
     private const val MAX_BATCH = 8
-    // Explicit text-generation models only; never auto-discover unrelated TTS models.
+    // Fixed text-generation fallback order; never discover or select TTS models.
     private val preferredModels = listOf("gemini-3.1-flash-lite", "gemini-3-flash-preview")
 
     fun translateBatch(

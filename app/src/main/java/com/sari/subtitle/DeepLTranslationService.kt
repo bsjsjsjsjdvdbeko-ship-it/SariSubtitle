@@ -122,10 +122,13 @@ object DeepLTranslationService {
             val target = targetLang.uppercase().take(2)
             val params = texts.joinToString("&") { "text=${URLEncoder.encode(it, "UTF-8")}" } +
                 "&source_lang=$source&target_lang=$target"
+            if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
             OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(params) }
+            if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
             if (code !in 200..299) return null
             val arr = JSONObject(body).optJSONArray("translations") ?: return null
             if (arr.length() != texts.size) return null
