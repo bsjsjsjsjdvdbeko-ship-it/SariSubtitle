@@ -20,17 +20,26 @@ object DeepLTranslationService {
         if (text.isBlank()) return text
         if (apiKey.isNotBlank()) {
             val deepL = tryDeepL(text, sourceLang, targetLang, apiKey).trim()
-            if (isUsableTranslation(text, deepL)) return deepL
+            if (isUsableTranslation(text, deepL, sourceLang, targetLang)) return deepL
         }
         val google = tryGoogleTranslate(text, targetLang).trim()
-        if (isUsableTranslation(text, google)) return google
+        if (isUsableTranslation(text, google, sourceLang, targetLang)) return google
         val memory = tryMyMemory(text, sourceLang, targetLang).trim()
-        if (isUsableTranslation(text, memory)) return android.text.Html.fromHtml(memory, android.text.Html.FROM_HTML_MODE_LEGACY).toString()
+        if (isUsableTranslation(text, memory, sourceLang, targetLang)) return android.text.Html.fromHtml(memory, android.text.Html.FROM_HTML_MODE_LEGACY).toString()
         throw IllegalStateException("تعذرت الترجمة عبر خدمات الترجمة المتاحة؛ تحقق من الاتصال وحدود الخدمات.")
     }
 
-    private fun isUsableTranslation(original: String, translated: String): Boolean =
-        translated.isNotBlank() && !translated.contains("???")
+    private fun isUsableTranslation(original: String, translated: String, sourceLang: String, targetLang: String): Boolean {
+        val result = translated.trim()
+        if (result.isBlank() || result.contains("???")) return false
+        if (!sourceLang.equals(targetLang, ignoreCase = true) && result.equals(original.trim(), ignoreCase = true)) return false
+        if (targetLang.equals("ar", ignoreCase = true) || targetLang.startsWith("ar-", ignoreCase = true)) {
+            val originalHasLatinWords = Regex("[A-Za-z]{3,}").containsMatchIn(original)
+            val hasArabic = Regex("[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]").containsMatchIn(result)
+            if (originalHasLatinWords && !hasArabic) return false
+        }
+        return true
+    }
 
     /**
      * ترجمة موثوقة متعددة المزودين:
@@ -71,43 +80,11 @@ object DeepLTranslationService {
             }
 
             val originalText = lines.drop(timeIndex + 1).joinToString("\n").trim()
-            var translated = originalText
-
-            // 🔵 الطبقة 1: DeepL (إذا مفتاح متاح)
-            if (apiKey.isNotBlank()) {
-                translated = tryDeepL(originalText, sourceLang, targetLang, apiKey)
-                // إذا نجح DeepL — تحقق من الجودة
-                if (translated.isNotBlank() && !translated.contains("???") && translated != originalText) {
-                    // نجح
-                } else {
-                    translated = originalText // إعادة تعيين للمحاولة التالية
-                }
-            }
-
-            // 🟢 الطبقة 2: Google Translate (مجاني)
-            if (translated == originalText) {
-                translated = tryGoogleTranslate(originalText, targetLang)
-                if (translated.isNotBlank() && !translated.contains("???") && translated != originalText) {
-                    // نجح
-                } else {
-                    translated = originalText
-                }
-            }
-
-            // 🟡 الطبقة 3: MyMemory (احتياطي أخير)
-            if (translated == originalText) {
-                translated = tryMyMemory(originalText, sourceLang, targetLang)
-                if (translated.isNotBlank() && !translated.contains("???") && translated != originalText) {
-                    // نجح
-                } else {
-                    translated = originalText
-                }
-            }
-
-            // 🔴 الطبقة 4: إذا فشل كل شيء — نحتفظ بالنص الأصلي
-            // لكن نُحوّل أي ???? إلى النص الأصلي
-            if (translated.contains("???") || translated.isBlank()) {
-                translated = originalText
+            // Never silently publish the source-language cue as the target-language subtitle.
+            // translateTextOnly tries DeepL, Google Translate and MyMemory, then throws on failure.
+            val translated = translateTextOnly(originalText, sourceLang, targetLang, apiKey)
+            if (!isUsableTranslation(originalText, translated, sourceLang, targetLang)) {
+                throw IllegalStateException("فشلت ترجمة المقطع رقم ${completed + 1} إلى $targetLang؛ لم يُعرض النص الأصلي كترجمة.")
             }
 
             while (lines.size > timeIndex + 1) lines.removeAt(lines.lastIndex)

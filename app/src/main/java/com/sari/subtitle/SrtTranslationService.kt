@@ -22,7 +22,7 @@ import java.net.URLEncoder
 object SrtTranslationService {
 
     // Batch size affects request grouping only. Original SRT timestamp lines remain untouched.
-    private const val TRANSLATION_BATCH_SIZE = 16
+    private const val TRANSLATION_BATCH_SIZE = 8
 
     private val timestampPattern = Regex("\\d{2}:\\d{2}:\\d{2}[,.]\\d{3}\\s*-->")
 
@@ -135,8 +135,7 @@ object SrtTranslationService {
                     output[originalIndex] = replaceCueText(originalBlock, matched)
                     applied = true
                 } else {
-                    // A missing/empty cue must not abort the file or alter any timestamp.
-                    // Retry just this cue once; if that also fails, keep its original text.
+                    // Retry a missing/empty cue once, but never publish the original-language text as a translation.
                     try {
                         val single = translateSrt(
                             source = originalBlock,
@@ -155,11 +154,12 @@ object SrtTranslationService {
                         if (shouldCancel() || e is java.util.concurrent.CancellationException) {
                             throw java.util.concurrent.CancellationException("تم إلغاء العملية")
                         }
-                        Log.e(TAG, "Translation failed for cue ${localIndex + 1}/${indexes.size} (original cue ${originalIndex + 1}, language=$language); keeping original text", e)
+                        Log.e(TAG, "Translation failed for cue ${localIndex + 1}/${indexes.size} (original cue ${originalIndex + 1}, language=$language); refusing to publish original text as translation", e)
+                        throw IllegalStateException("فشلت ترجمة المقطع رقم ${originalIndex + 1} إلى $targetLang. لم يتم عرض النص الأصلي كترجمة.", e)
                     }
                 }
                 if (!applied) {
-                    Log.w(TAG, "Cue ${localIndex + 1}/${indexes.size} (original cue ${originalIndex + 1}, language=$language) was not translated; original text and timestamp preserved")
+                    throw IllegalStateException("لم تُترجم القطعة رقم ${originalIndex + 1} إلى $targetLang. أُوقفت العملية لمنع عرض النص الأصلي كترجمة.")
                 }
                 finished++
                 onProgress(finished.coerceAtMost(totalForeign), totalForeign)
@@ -268,7 +268,8 @@ object SrtTranslationService {
             if (timeIndex < 0 || lines.drop(timeIndex + 1).all { it.isBlank() }) continue
             val text = lines.drop(timeIndex + 1).joinToString("\n").trim()
             val key = cacheKey(text, sourceLang, targetLang)
-            val cached = memoryCache[text] ?: readPersistentCache(context, key)
+            val cachedCandidate = memoryCache[text] ?: readPersistentCache(context, key)
+            val cached = cachedCandidate?.takeIf { isUsableTranslation(text, it, sourceLang, targetLang) }
             if (!cached.isNullOrBlank()) {
                 while (lines.size > timeIndex + 1) lines.removeAt(lines.lastIndex)
                 lines.add(cached)
@@ -333,10 +334,13 @@ object SrtTranslationService {
                 if (result.size != batchTexts.size) {
                     throw IOException("$provider أعاد ${result.size} نتيجة بينما المطلوب ${batchTexts.size}")
                 }
-                if (result.any { it.isBlank() }) {
-                    throw IOException("$provider أعاد نتيجة ترجمة فارغة")
+                val cleaned = result.map { it.trim() }
+                for (i in cleaned.indices) {
+                    if (!isUsableTranslation(batchTexts[i], cleaned[i], sourceLang, targetLang)) {
+                        throw IOException("$provider لم يُرجع ترجمة صالحة للمقطع ${i + 1} إلى $targetLang")
+                    }
                 }
-                return result.map { it.trim() }
+                return cleaned
             }
 
             fun logAttempt(provider: String, model: String, startedAt: Long, status: String,
@@ -428,9 +432,12 @@ object SrtTranslationService {
                     if (batchProvider == "none" || providerResult == null) {
                         Log.i(TAG, "cue=${cue.blockIndex + 1} provider=additional-text-fallback reason=Gemini/OmniRoute returned no cue or failed")
                     }
+                    if (!isUsableTranslation(cue.text, fallback, sourceLang, targetLang)) {
+                        throw IOException("أعاد مزود الترجمة النص الأصلي أو نصاً لا يبدو باللغة الهدف $targetLang")
+                    }
                     fallback
                 } catch (e: Exception) {
-                    Log.e(TAG, "Translation failed for cue=${cue.blockIndex + 1} source=$sourceLang target=$targetLang attempted=$batchProvider reason=${e.message}; original cue text retained", e)
+                    Log.e(TAG, "Translation failed for cue=${cue.blockIndex + 1} source=$sourceLang target=$targetLang attempted=$batchProvider reason=${e.message}; translation aborted to prevent source text from being shown as target", e)
                     throw IllegalStateException("فشل ترجمة المقطع رقم ${cue.blockIndex + 1} بعد تجربة $batchProvider والبدائل النصية: ${e.message}", e)
                 }
                 Log.i(TAG, "cue=${cue.blockIndex + 1} provider=${if (providerResult != null) batchProvider else "additional-text-fallback"} source=$sourceLang target=$targetLang resultChars=${translated.length}")
@@ -500,6 +507,19 @@ object SrtTranslationService {
         return null
     }
 
+    /** Reject unchanged source text and non-Arabic output when Arabic is requested. */
+    private fun isUsableTranslation(original: String, translated: String, sourceLang: String, targetLang: String): Boolean {
+        val result = translated.trim()
+        if (result.isBlank() || result.contains("???")) return false
+        if (!sourceLang.equals(targetLang, ignoreCase = true) && result.equals(original.trim(), ignoreCase = true)) return false
+        if (targetLang.lowercase().substringBefore('-') == "ar") {
+            val originalHasLatinWords = Regex("[A-Za-z]{3,}").containsMatchIn(original)
+            val hasArabic = Regex("[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]").containsMatchIn(result)
+            if (originalHasLatinWords && !hasArabic) return false
+        }
+        return true
+    }
+
     private fun cacheKey(text: String, sourceLang: String, targetLang: String): String {
         val raw = "$sourceLang|$targetLang|$text".toByteArray(Charsets.UTF_8)
         val digest = MessageDigest.getInstance("SHA-256").digest(raw)
@@ -561,7 +581,8 @@ object SrtTranslationService {
             recordFallbackAttempt("Azure Translator", "Azure Translator API", started, "قيد التنفيذ", "مقطع واحد", "$sourceLang→$targetLang")
             try {
                 val translated = AdditionalTranslationProviders.azure(text, sourceLang, targetLang, settings.azureTranslatorKey, settings.azureTranslatorRegion)
-                    .takeIf { it.isNotBlank() } ?: throw IOException("Azure Translator أعاد ترجمة فارغة")
+                    .takeIf { isUsableTranslation(text, it, sourceLang, targetLang) }
+                    ?: throw IOException("Azure Translator أعاد نصاً فارغاً أو لم يترجمه إلى $targetLang")
                 recordFallbackAttempt("Azure Translator", "Azure Translator API", started, "نجاح", "ترجمة صالحة", "$sourceLang→$targetLang; تم التحقق من النص")
                 return translated
             } catch (e: Exception) {
@@ -576,7 +597,8 @@ object SrtTranslationService {
             recordFallbackAttempt("Hugging Face", "Hugging Face translation", started, "قيد التنفيذ", "مقطع واحد", "$sourceLang→$targetLang")
             try {
                 val translated = AdditionalTranslationProviders.huggingFace(text, sourceLang, targetLang, settings.huggingFaceToken)
-                    .takeIf { it.isNotBlank() } ?: throw IOException("Hugging Face أعاد ترجمة فارغة")
+                    .takeIf { isUsableTranslation(text, it, sourceLang, targetLang) }
+                    ?: throw IOException("Hugging Face أعاد نصاً فارغاً أو لم يترجمه إلى $targetLang")
                 recordFallbackAttempt("Hugging Face", "Hugging Face translation", started, "نجاح", "ترجمة صالحة", "$sourceLang→$targetLang; تم التحقق من النص")
                 return translated
             } catch (e: Exception) {
@@ -592,7 +614,8 @@ object SrtTranslationService {
             recordFallbackAttempt("DeepL", "DeepL API", started, "قيد التنفيذ", "مقطع واحد", "$sourceLang→$targetLang; attempt=${attempt + 1}")
             try {
                 val translated = DeepLTranslationService.translateTextOnly(text, sourceLang, targetLang, settings?.deepLApiKey.orEmpty())
-                    .takeIf { it.isNotBlank() } ?: throw IOException("DeepL أعاد ترجمة فارغة")
+                    .takeIf { isUsableTranslation(text, it, sourceLang, targetLang) }
+                    ?: throw IOException("خدمات الترجمة أعادت نصاً فارغاً أو لم تترجمه إلى $targetLang")
                 recordFallbackAttempt("DeepL", "DeepL API", started, "نجاح", "ترجمة صالحة", "$sourceLang→$targetLang; تم التحقق من النص")
                 return translated
             } catch (e: Exception) {

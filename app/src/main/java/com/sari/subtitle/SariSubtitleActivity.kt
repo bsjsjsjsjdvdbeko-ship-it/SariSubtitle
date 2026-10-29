@@ -105,10 +105,9 @@ class SariSubtitleActivity : AppCompatActivity() {
     private var polling = false
     /** Last video-like WebView URL observed by the main-thread poller (covers SPA pushState navigation). */
     private var lastObservedVideoUrl: String? = null
-    /** Identity of the currently visible media item inside an X/YouTube single-page feed. */
-    private var lastObservedFeedVideoIdentity: String? = null
-    /** Canonical X post containing the currently visible feed video, when identifiable. */
-    private var currentFeedPostUrl: String? = null
+    /** X post identity belonging to the video currently most visible inside the WebView feed. */
+    private var activeVisiblePostUrl: String? = null
+    private var missingVisiblePostSamples = 0
     private var overlayOn = false
     private var subtitlesVisible = true
     private var dubbingEnabled = false
@@ -212,11 +211,24 @@ class SariSubtitleActivity : AppCompatActivity() {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
 
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                val target = url?.trim().orEmpty()
+                if (target.isNotBlank() && lastSrtUrl?.let { sameVideoUrl(it, target) } != true) {
+                    // A page/profile URL is not itself a video identity. Never carry the
+                    // previous post's cues while a new page/feed video is being identified.
+                    activeVisiblePostUrl = null
+                    clearActiveSubtitleForVideoChange()
+                }
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 injectAutoShow()
-                // ⚡ محاولة استرجاع SRT لهذا URL
-                if (url != null) {
+                // Only direct video pages can be restored here. Profile/feed pages are
+                // resolved later from the status link of the actually visible video card.
+                if (url != null && isVideoLikeUrl(url)) {
+                    if (isXStatusUrl(url)) activeVisiblePostUrl = url
                     tryAutoLoadSrt(url)
                     preparePlaybackResume(url)
                 }
@@ -442,11 +454,12 @@ class SariSubtitleActivity : AppCompatActivity() {
             webView.loadUrl(sharedUrl)
             statusText.text = "تم استلام رابط مشاركته مع Sari Subtitle. اضغط «إنشاء SRT من رابط» لإنشاء الترجمة العربية."
         } else {
-            // Always start on the home page. Cached SRTs remain available when the user
-            // opens their matching post; a previous link must never auto-open on launch.
-            val startUrl = "https://x.com/"
-            urlInput.setText(startUrl)
-            webView.loadUrl(startUrl)
+            // Always start at the home page. Cached URLs remain available through history,
+            // but must never hijack a fresh app launch.
+            activeVisiblePostUrl = null
+            lastObservedVideoUrl = null
+            urlInput.setText("https://x.com/")
+            webView.loadUrl("https://x.com/")
         }
     }
 
@@ -484,6 +497,9 @@ class SariSubtitleActivity : AppCompatActivity() {
             val srtText = storage.load(url) ?: return false
             val cues = SrtParser.parse(srtText.byteInputStream(Charsets.UTF_8))
             if (cues.isEmpty()) return false
+            // A parseable SRT is not necessarily a successful Arabic translation.
+            // Never restore a mostly English/Spanish cache as if it were Arabic subtitles.
+            if (looksUntranslatedForArabic(cues.map { it.text })) return false
             repo.setCues(cues)
             lastSrtText = srtText
             lastSrtUrl = url
@@ -493,6 +509,16 @@ class SariSubtitleActivity : AppCompatActivity() {
         } catch (_: Exception) {
             false
         }
+    }
+
+    private fun looksUntranslatedForArabic(texts: List<String>): Boolean {
+        val meaningful = texts.map { it.trim() }.filter { it.isNotBlank() && it.length > 2 }
+        if (meaningful.isEmpty()) return false
+        val arabic = Regex("[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]")
+        val latin = Regex("[A-Za-z]{3,}")
+        val arabicCues = meaningful.count { arabic.containsMatchIn(it) }
+        val foreignOnlyCues = meaningful.count { latin.containsMatchIn(it) && !arabic.containsMatchIn(it) }
+        return foreignOnlyCues >= 2 && foreignOnlyCues * 2 >= meaningful.size && arabicCues * 3 < meaningful.size
     }
 
     /**
@@ -826,11 +852,46 @@ class SariSubtitleActivity : AppCompatActivity() {
             return
         }
 
+        // If an earlier failed attempt left a parseable source-language SRT in cache,
+        // do not display it as Arabic. Offer a retry using that saved source text instead.
+        val cachedCandidate = storage.load(videoUrl)
+        val cachedCandidateCues = cachedCandidate?.let { runCatching { SrtParser.parse(it.byteInputStream(Charsets.UTF_8)) }.getOrNull() }
+        if (!cachedCandidate.isNullOrBlank() && !cachedCandidateCues.isNullOrEmpty() && looksUntranslatedForArabic(cachedCandidateCues.map { it.text })) {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("الترجمة المحفوظة غير صحيحة")
+                .setMessage("الملف المحفوظ يبدو أنه ما زال باللغة الأصلية، لذلك لن أعرضه كترجمة عربية. يمكنك محاولة ترجمته مرة أخرى.")
+                .setNegativeButton("إلغاء", null)
+                .setPositiveButton("ترجمة مرة أخرى") { _, _ ->
+                    translateAndShowSrtAutomatically(videoUrl, cachedCandidate, "retry_${System.currentTimeMillis()}.srt", sourceTitle = currentVideoTitle())
+                }
+                .show()
+            statusText.text = "الترجمة المحفوظة لم تُعرض لأنها تبدو بلغة المصدر. اختر «ترجمة مرة أخرى» للمحاولة."
+            return
+        }
+
         // Cache-first: reuse a previously saved SRT before contacting any provider or site.
         // This avoids spending transcription quota when the same URL is opened again.
         if (restoreCachedSrt(videoUrl)) {
-            Toast.makeText(this, "تم تحميل الترجمة المحفوظة دون إعادة المعالجة", Toast.LENGTH_LONG).show()
-            statusText.text = "تمت استعادة الترجمة المحفوظة لهذا الفيديو. لم يتم استدعاء أي مزود ذكاء اصطناعي."
+            Toast.makeText(this, "تمت استعادة الترجمة المحفوظة بنجاح", Toast.LENGTH_LONG).show()
+            statusText.text = "تمت استعادة الترجمة المحفوظة لهذا الفيديو. يمكنك إعادة الترجمة إذا كانت النتيجة السابقة غير صحيحة."
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("تمت استعادة الترجمة المحفوظة بنجاح")
+                .setMessage("عُثر على ملف ترجمة محفوظ لهذا الفيديو. إذا كانت الترجمة السابقة غير صحيحة أو بقيت باللغة الأصلية، يمكنك محاولة ترجمتها مرة أخرى.")
+                .setNegativeButton("استخدام الترجمة المحفوظة", null)
+                .setPositiveButton("ترجمة مرة أخرى") { _, _ ->
+                    val retrySource = lastSrtText.orEmpty()
+                    if (retrySource.isBlank()) {
+                        Toast.makeText(this, "لا يوجد نص محفوظ لإعادة ترجمته", Toast.LENGTH_LONG).show()
+                    } else {
+                        translateAndShowSrtAutomatically(
+                            videoUrl = videoUrl,
+                            sourceSrt = retrySource,
+                            fileName = "retry_${System.currentTimeMillis()}.srt",
+                            sourceTitle = currentVideoTitle()
+                        )
+                    }
+                }
+                .show()
             return
         }
 
@@ -2382,9 +2443,24 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                 }
             }
             actions.addView(localButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(4) })
+            // Keep playback of the currently linked local video separate from choosing a new file.
+            // This makes the Android document picker reachable even after a previous video was linked.
+            val changeLocalButton = Button(this).apply {
+                text = "📂 اختيار فيديو جديد"
+                isAllCaps = false
+                setOnClickListener {
+                    val savedSrt = storage.loadLibraryItem(item.id)
+                    if (savedSrt.isNullOrBlank()) {
+                        Toast.makeText(this@SariSubtitleActivity, "تعذّر فتح ملف الترجمة", Toast.LENGTH_LONG).show()
+                    } else {
+                        pickLocalVideoForLibraryItem(item.id)
+                    }
+                }
+            }
             row.addView(title)
             row.addView(details)
             row.addView(actions)
+            row.addView(changeLocalButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2) })
             row.setOnLongClickListener {
                 androidx.appcompat.app.AlertDialog.Builder(this)
                     .setTitle("حذف من ملفاتي؟")
@@ -2547,9 +2623,17 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         } catch (_: Exception) { false }
     }
 
-    private fun currentVideoUrlForCache(): String? =
-        currentFeedPostUrl?.takeIf { isXStatusUrl(it) }
-            ?: webView.url?.trim()?.takeIf { isVideoLikeUrl(it) }
+    private fun currentVideoUrlForCache(): String? {
+        val pageUrl = webView.url?.trim().orEmpty()
+        val visiblePost = activeVisiblePostUrl?.trim().orEmpty()
+        // On an X profile/feed, key SRT to the visible post, not to the profile URL.
+        // On a direct status page, prefer the page URL if the feed detector is stale.
+        if (isXStatusUrl(visiblePost) &&
+            (!isXStatusUrl(pageUrl) || sameVideoUrl(pageUrl, visiblePost))) {
+            return visiblePost
+        }
+        return pageUrl.takeIf { isVideoLikeUrl(it) }
+    }
 
     /** Use the current X post URL when the selected-media transcription was launched from an X post;
      * otherwise keep the original local content/file URI. Never create synthetic local-media:// IDs. */
@@ -2557,6 +2641,12 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         val currentPage = webView.url.orEmpty().trim()
         return if (isXStatusUrl(currentPage)) currentPage else uri.toString()
     }
+
+    private fun isXHostUrl(raw: String): Boolean = try {
+        val uri = Uri.parse(raw.trim())
+        val host = uri.host.orEmpty().lowercase(Locale.ROOT).removePrefix("www.")
+        host == "x.com" || host.endsWith(".x.com") || host == "twitter.com" || host.endsWith(".twitter.com")
+    } catch (_: Exception) { false }
 
     private fun isXStatusUrl(raw: String): Boolean = try {
         val uri = Uri.parse(raw.trim())
@@ -3065,6 +3155,47 @@ private fun openAudioPicker() {
         webView.evaluateJavascript(js, null)
     }
 
+    /** Clear only the active display state; saved SRT files remain untouched. */
+    private fun clearActiveSubtitleForVideoChange() {
+        repo.clear()
+        repo.offsetMs = settings.offsetMs
+        lastSrtText = null
+        lastSrtUrl = null
+        overlayOn = false
+        lastDubbingCueStartMs = -1L
+        activePlaybackKey = null
+        pendingResumePositionMs = 0L
+        resumePromptShownForKey = null
+        resumeAppliedForKey = null
+        lastPlaybackPositionMs = 0L
+        lastPlaybackDurationMs = 0L
+        lastPlaybackSaveAtMs = 0L
+        runCatching { textToSpeech?.stop() }
+        if (::subtitleOverlay.isInitialized) subtitleOverlay.hide()
+    }
+
+    /** Switch subtitle state only when the visible X post identity actually changes. */
+    private fun activateVisiblePost(rawPostUrl: String) {
+        val postUrl = rawPostUrl.trim()
+        if (!isXStatusUrl(postUrl)) return
+        if (activeVisiblePostUrl?.let { sameVideoUrl(it, postUrl) } == true) return
+        activeVisiblePostUrl = postUrl
+        val restored = tryAutoLoadSrt(postUrl)
+        if (!restored) {
+            // A new post with no cached SRT must never inherit the previous post's cues.
+            clearActiveSubtitleForVideoChange()
+        }
+        preparePlaybackResume(postUrl)
+        pollPlaybackStateAfterPostSwitch()
+    }
+
+    private fun pollPlaybackStateAfterPostSwitch() {
+        lastPlaybackPositionMs = 0L
+        lastPlaybackDurationMs = 0L
+        lastPlaybackSaveAtMs = 0L
+        lastDubbingCueStartMs = -1L
+    }
+
     private fun startPolling() {
         if (polling) return
         polling = true
@@ -3228,19 +3359,22 @@ private fun openAudioPicker() {
                 }
                 var t = Number(best.currentTime);
                 var d = Number(best.duration);
+                // Find the X status URL attached to this exact video card. The page URL
+                // often remains a profile URL while the user swipes through feed videos.
                 var postUrl = '';
                 try {
                   var article = best.closest ? best.closest('article') : null;
                   if (article) {
-                    var links = Array.from(article.querySelectorAll('a[href]'));
-                    var statusLink = links.find(function(a) {
-                      try { return /\/(?:[^/]+\/)?status\/\d+(?:[/?#]|$)/i.test(new URL(a.href, location.href).pathname); }
-                      catch(e) { return false; }
-                    });
-                    if (statusLink) {
-                      var u = new URL(statusLink.href, location.href);
-                      var match = u.pathname.match(/\/status\/(\d+)/i);
-                      if (match) postUrl = 'https://x.com/i/status/' + match[1];
+                    var links = article.querySelectorAll('a[href*="/status/"]');
+                    for (var li = 0; li < links.length; li++) {
+                      var href = links[li].href || '';
+                      var parsed = new URL(href, location.href);
+                      var host = (parsed.hostname || '').toLowerCase().replace(/^www\./, '');
+                      var statusMatch = parsed.pathname.match(/^\/([^/]+)\/status\/(\d+)(?:\/|$)/);
+                      if ((host === 'x.com' || host === 'twitter.com') && statusMatch) {
+                        postUrl = 'https://x.com/' + statusMatch[1] + '/status/' + statusMatch[2];
+                        break;
+                      }
                     }
                   }
                 } catch(e) {}
@@ -3250,8 +3384,7 @@ private fun openAudioPicker() {
                   duration: Number.isFinite(d) ? d : 0,
                   paused: !!best.paused,
                   readyState: best.readyState,
-                  postUrl: postUrl,
-                  mediaSrc: String(best.currentSrc || best.src || '')
+                  postUrl: postUrl
                 });
               } catch(e) { return JSON.stringify({error: String(e)}); }
             })();
@@ -3268,6 +3401,25 @@ private fun openAudioPicker() {
     private fun onTimeUpdate(json: String) {
         try {
             val o = JSONObject(json)
+            val detectedPostUrl = o.optString("postUrl").trim()
+            if (detectedPostUrl.isNotBlank() && isXStatusUrl(detectedPostUrl)) {
+                missingVisiblePostSamples = 0
+                activateVisiblePost(detectedPostUrl)
+            } else {
+                val pageUrl = webView.url?.trim().orEmpty()
+                val isXFeedPage = isXHostUrl(pageUrl) && !isXStatusUrl(pageUrl)
+                if (isXFeedPage && activeVisiblePostUrl != null) {
+                    missingVisiblePostSamples++
+                    // If the feed has moved but its card identity is not yet available,
+                    // fail closed after a short grace period rather than showing stale cues.
+                    if (missingVisiblePostSamples >= 3) {
+                        activeVisiblePostUrl = null
+                        clearActiveSubtitleForVideoChange()
+                    }
+                } else {
+                    missingVisiblePostSamples = 0
+                }
+            }
             if (o.has("error")) {
                 statusText.text = "خطأ: ${o.getString("error")}"
                 return
@@ -3276,34 +3428,6 @@ private fun openAudioPicker() {
             if (total == 0) {
                 statusText.text = "لا يوجد فيديو — total=0"
                 return
-            }
-            val detectedPostUrl = o.optString("postUrl").trim().takeIf { it.isNotBlank() && isXStatusUrl(it) }
-            val postUrl = detectedPostUrl ?: webView.url?.trim()?.takeIf { isXStatusUrl(it) }
-            currentFeedPostUrl = postUrl
-            val mediaSrc = o.optString("mediaSrc").trim()
-            val feedIdentity = postUrl?.let { VideoUrlIdentity.normalize(it) }
-                ?: mediaSrc.takeIf { it.isNotBlank() }?.let { "media:" + it }
-            if (!feedIdentity.isNullOrBlank() && feedIdentity != lastObservedFeedVideoIdentity) {
-                val previousIdentity = lastObservedFeedVideoIdentity
-                lastObservedFeedVideoIdentity = feedIdentity
-                if (postUrl != null) {
-                    // A feed item changed even when WebView.url stayed on the profile/feed page.
-                    tryAutoLoadSrt(postUrl)
-                    preparePlaybackResume(postUrl)
-                } else if (previousIdentity != null || !lastSrtUrl.isNullOrBlank()) {
-                    // A different media element without a verifiable post ID must never inherit
-                    // the previous video's subtitles.
-                    repo.clear()
-                    repo.offsetMs = settings.offsetMs
-                    lastSrtText = null
-                    lastSrtUrl = null
-                    overlayOn = false
-                    subtitleOverlay.hide()
-                    activePlaybackKey = null
-                    pendingResumePositionMs = 0L
-                    resumePromptShownForKey = null
-                    resumeAppliedForKey = null
-                }
             }
             val t = o.optDouble("currentTime", 0.0)
             val d = o.optDouble("duration", 0.0)
