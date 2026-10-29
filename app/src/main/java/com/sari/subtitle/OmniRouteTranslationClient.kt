@@ -15,7 +15,8 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
         texts: List<String>,
         sourceLang: String,
         targetLang: String,
-        context: List<String> = emptyList()
+        context: List<String> = emptyList(),
+        modelOverride: String? = null
     ): List<String> {
         require(texts.isNotEmpty() && texts.size <= 16) { "حجم دفعة OmniRoute غير صالح (الحد 16)." }
         val input = JSONArray().apply { texts.forEach { put(it) } }
@@ -34,7 +35,8 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
             $input
         """.trimIndent()
         val payload = JSONObject()
-            .put("model", settings.omniRouteTextModel.trim().ifBlank { "auto" })
+            .put("model", modelOverride?.trim()?.takeIf { it.isNotBlank() }
+                ?: settings.omniRouteTextModel.trim().ifBlank { "auto" })
             .put("messages", JSONArray()
                 .put(JSONObject().put("role", "system").put("content", "You are a careful subtitle translator. Output only the requested JSON."))
                 .put(JSONObject().put("role", "user").put("content", prompt)))
@@ -45,8 +47,9 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
         if (content.isBlank()) throw IOException("OmniRoute أعاد رد ترجمة فارغًا.")
         val arr = parseTranslationsArray(content)
             ?: throw IOException("رد OmniRoute لا يحتوي على JSON صالح لحقل translations؛ لم تُقبل أي نتيجة غير موثقة.")
-        if (arr.length() != texts.size) throw IOException("OmniRoute أعاد ${arr.length()} ترجمة بينما المطلوب ${texts.size}.")
-        val results = (0 until arr.length()).map { i ->
+        if (arr.length() < texts.size) throw IOException("OmniRoute أعاد ${arr.length()} ترجمة بينما المطلوب ${texts.size}؛ لا يمكن إكمال الدفعة بأمان.")
+        // Ignore excess model output; only the first N results correspond to original cues.
+        val results = (0 until texts.size).map { i ->
             if (arr.isNull(i) || arr.opt(i) !is String) throw IOException("عنصر ترجمة OmniRoute رقم ${i + 1} ليس نصًا.")
             arr.optString(i).trim()
         }
@@ -84,9 +87,19 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
         return null
     }
 
-    fun testConnection(): String {
+    fun availableModelIds(): List<String> {
         val response = requestJson("/models", null, 45000, 45000)
-        val count = response.optJSONArray("data")?.length() ?: 0
+        val data = response.optJSONArray("data") ?: return emptyList()
+        return (0 until data.length()).mapNotNull { i ->
+            data.optJSONObject(i)?.optString("id")?.trim()?.takeIf { it.isNotBlank() }
+        }
+    }
+
+    fun findModelId(providerFragment: String): String? = availableModelIds()
+        .firstOrNull { it.contains(providerFragment, ignoreCase = true) }
+
+    fun testConnection(): String {
+        val count = availableModelIds().size
         return "اتصال OmniRoute ناجح. النماذج الظاهرة: $count"
     }
 

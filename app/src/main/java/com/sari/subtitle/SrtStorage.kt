@@ -84,8 +84,20 @@ class SrtStorage(private val context: Context) {
                 }
             }
 
-            // Reuse an existing item ID so the library entry is replaced in place.
-            val id = matchingIds.firstOrNull() ?: UUID.randomUUID().toString()
+            // A preserved version gets its own ID/file and a human-readable version number.
+            val versionNumber = if (preserveVersion && !safeSource.isNullOrBlank()) {
+                index.keys().asSequence().count { key ->
+                    val entry = index.optJSONObject(key)
+                    val oldSource = entry?.optString("sourceUrl").orEmpty()
+                    oldSource.isNotBlank() && VideoUrlIdentity.canonicalKey(oldSource) == VideoUrlIdentity.canonicalKey(safeSource)
+                } + 1
+            } else 0
+            val id = if (preserveVersion) UUID.randomUUID().toString() else matchingIds.firstOrNull() ?: UUID.randomUUID().toString()
+            val savedTitle = if (preserveVersion) {
+                val base = title.ifBlank { "ترجمة محفوظة.srt" }
+                val stem = base.removeSuffix(".srt").removeSuffix(".SRT")
+                "$stem - ترجمة $versionNumber.srt"
+            } else title.ifBlank { "ترجمة محفوظة.srt" }
             val fileName = "library_${UUID.randomUUID()}.srt"
             val outputFile = File(dir, fileName)
             createdFile = outputFile
@@ -105,7 +117,7 @@ class SrtStorage(private val context: Context) {
             }
             val previousEntry = readLibraryIndex().optJSONObject(id)
             index.put(id, JSONObject().apply {
-                put("title", title.ifBlank { "ترجمة محفوظة.srt" })
+                put("title", savedTitle)
                 put("fileName", fileName)
                 put("cueCount", cueCount)
                 put("savedAt", System.currentTimeMillis())

@@ -11,7 +11,8 @@ import java.net.URL
 /** ترجمة نصوص SRT عبر Gemini؛ يرسل النص فقط ولا يرسل الصوت أو توقيتات الفيديو. */
 object GeminiTranslationService {
     private const val MAX_BATCH = 8
-    private val preferredModels = listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite")
+    // Explicit text-generation models only; never auto-discover unrelated TTS models.
+    private val preferredModels = listOf("gemini-3.1-flash-lite", "gemini-3-flash-preview")
 
     fun translateBatch(
         texts: List<String>,
@@ -47,8 +48,7 @@ object GeminiTranslationService {
                 .put("responseMimeType", "application/json")
                 .put("maxOutputTokens", (texts.sumOf { it.length } * 3 + 256).coerceIn(512, 8192)))
 
-        val models = discoverModels(apiKey)
-        if (models.isEmpty()) throw IllegalStateException("لم يُرجع Gemini أي نموذج يدعم generateContent لهذا المفتاح.")
+        val models = preferredModels
         val failures = mutableListOf<String>()
         for (model in models) {
             if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
@@ -58,36 +58,11 @@ object GeminiTranslationService {
                 if (e is java.util.concurrent.CancellationException || Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
                 val detail = (e.message ?: e.javaClass.simpleName).take(180)
                 failures += "$model: $detail"
-                // Try another model only for model availability/quota/server failures; don't hide malformed successful responses.
-                if (!detail.contains("HTTP 404") && !detail.contains("HTTP 429") && !detail.contains("HTTP 5")) throw e
+                // Any failed attempt advances immediately to the configured backup model.
+                // Cancellation is handled above and is never swallowed.
             }
         }
         throw IllegalStateException("فشلت نماذج Gemini المتاحة: ${failures.joinToString(" | ")}")
-    }
-
-    private fun discoverModels(apiKey: String): List<String> {
-        val connection = NetworkRequestRegistry.register(URL("https://generativelanguage.googleapis.com/v1beta/models?pageSize=100")
-            .openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"; connectTimeout = 12000; readTimeout = 18000
-            setRequestProperty("x-goog-api-key", apiKey.trim())
-            setRequestProperty("Accept", "application/json")
-        }
-        try {
-            val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) throw IllegalStateException("تعذر فحص نماذج Gemini (HTTP $code)")
-            val arr = JSONObject(body).optJSONArray("models") ?: return emptyList()
-            val available = mutableListOf<String>()
-            for (i in 0 until arr.length()) {
-                val item = arr.optJSONObject(i) ?: continue
-                val name = item.optString("name").removePrefix("models/")
-                val methods = item.optJSONArray("supportedGenerationMethods") ?: JSONArray()
-                val supports = (0 until methods.length()).any { methods.optString(it) == "generateContent" }
-                if (supports && name.contains("flash", ignoreCase = true) && !name.contains("embedding", ignoreCase = true)) available += name
-            }
-            return (preferredModels.filter { it in available } + available.filter { it !in preferredModels }.sorted()).distinct()
-        } finally { connection.disconnect(); NetworkRequestRegistry.unregister(connection) }
     }
 
     private fun requestModel(model: String, payload: String, apiKey: String, expectedCount: Int): List<String> {

@@ -380,12 +380,54 @@ object SrtTranslationService {
                         (android.os.SystemClock.elapsedRealtime() - attemptStarted).coerceAtLeast(0L))
                     Log.e(TAG, "OmniRoute batch failed; configured route will continue to next text provider. source=$sourceLang target=$targetLang batchSize=${batchTexts.size} reason=$reason", e)
                     logAttempt("OmniRoute", model, attemptStarted, "فشل", "لم تُقبل أي نتيجة", reason)
-                    omniRouteAvailable = false
+                    // Keep the gateway eligible: the next model alias (xKiro/Gemini) may still work.
                     null
                 }
             }
 
-            fun tryGemini(): List<String>? {
+            fun tryGatewayModel(providerLabel: String, modelId: String): List<String>? {
+                if (settings == null || !omniRouteAvailable) return null
+                if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+                val attemptStarted = android.os.SystemClock.elapsedRealtime()
+                logAttempt(providerLabel, modelId, attemptStarted, "قيد التنفيذ", "${batchTexts.size} نص", "عبر بوابة OmniRoute")
+                return try {
+                    val result = validateBatch(providerLabel, OmniRouteTranslationClient(settings).translateBatch(
+                        batchTexts, sourceLang, targetLang, modelOverride = modelId
+                    ))
+                    batchProvider = providerLabel
+                    logAttempt(providerLabel, modelId, attemptStarted, "نجاح", "${result.size}/${batchTexts.size} ترجمة صالحة", "$sourceLang→$targetLang; تم التحقق من الرد")
+                    result
+                } catch (e: Exception) {
+                    if (shouldCancel() || e is java.util.concurrent.CancellationException) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+                    val reason = (e.message ?: e.javaClass.simpleName).take(300)
+                    providerFailures += "$providerLabel: $reason"
+                    logAttempt(providerLabel, modelId, attemptStarted, "فشل", "لم تُقبل النتيجة", reason)
+                    Log.w(TAG, "$providerLabel model=$modelId failed via OmniRoute; continuing fallback: $reason")
+                    null
+                }
+            }
+
+            fun tryGemini(): List<String>? =
+                tryGatewayModel("Gemini", "gemini/gemini-3.1-flash-lite")
+                    ?: tryGatewayModel("Gemini", "gemini/gemini-3-flash-preview")
+
+            fun tryXKiro(): List<String>? {
+                if (settings == null || !omniRouteAvailable) return null
+                return try {
+                    val modelId = OmniRouteTranslationClient(settings).findModelId("xkiro")
+                    if (modelId.isNullOrBlank()) {
+                        providerFailures += "xKiro: لا يظهر نموذج xKiro ضمن قائمة نماذج OmniRoute المتاحة"
+                        logAttempt("xKiro", "model lookup", android.os.SystemClock.elapsedRealtime(), "تخطي", "لا يوجد نموذج مطابق", "لم يتم اختراع معرّف نموذج غير موجود")
+                        null
+                    } else tryGatewayModel("xKiro", modelId)
+                } catch (e: Exception) {
+                    if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+                    providerFailures += "xKiro: ${(e.message ?: e.javaClass.simpleName).take(200)}"
+                    null
+                }
+            }
+
+            fun tryGeminiDirectLegacy(): List<String>? {
                 if (!geminiAvailable) return null
                 if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
                 val attemptStarted = android.os.SystemClock.elapsedRealtime()
@@ -422,11 +464,8 @@ object SrtTranslationService {
             // One source of truth for automatic and manually selected SRT translation.
             // Vosk is STT, not a text-translation fallback; it is never called from this route.
             Log.i(TAG, "Translation route=${if (omniFirst) "OmniRoute->Gemini" else if (omniRouteAvailable) "Gemini->OmniRoute" else "Gemini->text-fallbacks"} ranked=${routedTranslation.joinToString("->")} source=$sourceLang target=$targetLang cues=${batch.size}")
-            if (omniFirst) {
-                batchResults = tryOmniRoute() ?: tryGemini()
-            } else {
-                batchResults = tryGemini() ?: tryOmniRoute()
-            }
+            // Required order: OmniRoute -> xKiro -> Gemini 3.1 Flash Lite -> Gemini 3 Flash Preview -> DeepL fallback.
+            batchResults = tryOmniRoute() ?: tryXKiro() ?: tryGemini()
 
             var primaryResultsUsed = 0
             var textFallbackResultsUsed = 0

@@ -66,10 +66,12 @@ object DeepLTranslationService {
         var completed = 0
         for (batch in cues.chunked(8)) {
             if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
-            val deeplResults = if (apiKey.isNotBlank()) tryDeepLBatch(batch.map { it.text }, sourceLang, targetLang, apiKey) else null
+            val deeplResults: List<String?> = if (apiKey.isNotBlank()) {
+                translateDeepLAdaptive(batch.map { it.text }, sourceLang, targetLang, apiKey)
+            } else List(batch.size) { null }
             for ((i, cue) in batch.withIndex()) {
                 if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
-                val deepl = deeplResults?.getOrNull(i).orEmpty().trim()
+                val deepl = deeplResults.getOrNull(i).orEmpty().trim()
                 var translated = deepl.takeIf { isUsableTranslation(cue.text, it) && it != cue.text }.orEmpty()
                 if (translated.isBlank()) {
                     val google = tryGoogleTranslate(cue.text, targetLang).trim()
@@ -91,7 +93,21 @@ object DeepLTranslationService {
         return output.joinToString("\n\n") + "\n"
     }
 
-    /** Send up to eight text parameters in one DeepL request; response order matches request order. */
+    /** Try a batch as-is, then recursively split failures: 8 -> 4 -> 2 -> 1. */
+    private fun translateDeepLAdaptive(texts: List<String>, sourceLang: String, targetLang: String, apiKey: String): List<String?> {
+        if (texts.isEmpty()) return emptyList()
+        if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+        val response = tryDeepLBatch(texts, sourceLang, targetLang, apiKey)
+        if (response != null && response.size == texts.size && response.indices.all { isUsableTranslation(texts[it], response[it]) }) {
+            return response.map { it.trim() }
+        }
+        if (texts.size == 1) return listOf(null)
+        val midpoint = texts.size / 2
+        return translateDeepLAdaptive(texts.subList(0, midpoint), sourceLang, targetLang, apiKey) +
+            translateDeepLAdaptive(texts.subList(midpoint, texts.size), sourceLang, targetLang, apiKey)
+    }
+
+    /** Send text parameters in one DeepL request; response order matches request order. */
     private fun tryDeepLBatch(texts: List<String>, sourceLang: String, targetLang: String, apiKey: String): List<String>? {
         if (texts.isEmpty()) return emptyList()
         var connection: HttpURLConnection? = null
