@@ -13,7 +13,7 @@ import java.net.URL
 class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
     companion object {
         /** Fixed, user-verified translation model; never fall back to OmniRoute auto routing. */
-        const val FIXED_TRANSLATION_MODEL = "xkiro/qwen/qwen3-vl-plus:free"
+        const val FIXED_TRANSLATION_MODEL = "xkiro/qwen/qwen3.5-omni-flash:free"
     }
 
     fun translateBatch(
