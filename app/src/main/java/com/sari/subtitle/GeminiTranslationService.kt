@@ -10,8 +10,8 @@ import java.net.URL
 
 /** ترجمة نصوص SRT عبر Gemini؛ يرسل النص فقط ولا يرسل الصوت أو توقيتات الفيديو. */
 object GeminiTranslationService {
-    private const val MODEL = "gemini-3.8-flash"
     private const val MAX_BATCH = 8
+    private val preferredModels = listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite")
 
     fun translateBatch(
         texts: List<String>,
@@ -47,18 +47,59 @@ object GeminiTranslationService {
                 .put("responseMimeType", "application/json")
                 .put("maxOutputTokens", (texts.sumOf { it.length } * 3 + 256).coerceIn(512, 8192)))
 
-        val connection = NetworkRequestRegistry.register(URL("https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent")
+        val models = discoverModels(apiKey)
+        if (models.isEmpty()) throw IllegalStateException("لم يُرجع Gemini أي نموذج يدعم generateContent لهذا المفتاح.")
+        val failures = mutableListOf<String>()
+        for (model in models) {
+            if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+            try {
+                return requestModel(model, request.toString(), apiKey, texts.size)
+            } catch (e: Exception) {
+                if (e is java.util.concurrent.CancellationException || Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+                val detail = (e.message ?: e.javaClass.simpleName).take(180)
+                failures += "$model: $detail"
+                // Try another model only for model availability/quota/server failures; don't hide malformed successful responses.
+                if (!detail.contains("HTTP 404") && !detail.contains("HTTP 429") && !detail.contains("HTTP 5")) throw e
+            }
+        }
+        throw IllegalStateException("فشلت نماذج Gemini المتاحة: ${failures.joinToString(" | ")}")
+    }
+
+    private fun discoverModels(apiKey: String): List<String> {
+        val connection = NetworkRequestRegistry.register(URL("https://generativelanguage.googleapis.com/v1beta/models?pageSize=100")
             .openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = 15000
-            readTimeout = 45000
-            doOutput = true
+            requestMethod = "GET"; connectTimeout = 12000; readTimeout = 18000
+            setRequestProperty("x-goog-api-key", apiKey.trim())
+            setRequestProperty("Accept", "application/json")
+        }
+        try {
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) throw IllegalStateException("تعذر فحص نماذج Gemini (HTTP $code)")
+            val arr = JSONObject(body).optJSONArray("models") ?: return emptyList()
+            val available = mutableListOf<String>()
+            for (i in 0 until arr.length()) {
+                val item = arr.optJSONObject(i) ?: continue
+                val name = item.optString("name").removePrefix("models/")
+                val methods = item.optJSONArray("supportedGenerationMethods") ?: JSONArray()
+                val supports = (0 until methods.length()).any { methods.optString(it) == "generateContent" }
+                if (supports && name.contains("flash", ignoreCase = true) && !name.contains("embedding", ignoreCase = true)) available += name
+            }
+            return (preferredModels.filter { it in available } + available.filter { it !in preferredModels }.sorted()).distinct()
+        } finally { connection.disconnect(); NetworkRequestRegistry.unregister(connection) }
+    }
+
+    private fun requestModel(model: String, payload: String, apiKey: String, expectedCount: Int): List<String> {
+        val connection = NetworkRequestRegistry.register(URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
+            .openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"; connectTimeout = 15000; readTimeout = 45000; doOutput = true
             setRequestProperty("x-goog-api-key", apiKey.trim())
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
             setRequestProperty("Accept", "application/json")
         }
         try {
-            OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(request.toString()) }
+            OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(payload) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val body = stream?.let { BufferedReader(InputStreamReader(it, Charsets.UTF_8)).use { reader -> reader.readText() } }.orEmpty()
@@ -66,24 +107,21 @@ object GeminiTranslationService {
                 val detail = runCatching { JSONObject(body).optJSONObject("error")?.optString("message") }.getOrNull()
                 throw IllegalStateException("Gemini HTTP $code${detail?.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty()}")
             }
-            val root = JSONObject(body)
-            val candidates = root.optJSONArray("candidates") ?: throw IllegalStateException("Gemini لم يُرجع نتائج")
-            val content = candidates.optJSONObject(0)?.optJSONObject("content")
-                ?: throw IllegalStateException("Gemini لم يُرجع محتوى قابلًا للترجمة")
+            val candidates = JSONObject(body).optJSONArray("candidates") ?: throw IllegalStateException("Gemini لم يُرجع نتائج")
+            val content = candidates.optJSONObject(0)?.optJSONObject("content") ?: throw IllegalStateException("Gemini لم يُرجع محتوى قابلًا للترجمة")
             val parts = content.optJSONArray("parts") ?: throw IllegalStateException("رد Gemini فارغ")
-            val responseText = buildString {
-                for (i in 0 until parts.length()) append(parts.optJSONObject(i)?.optString("text", "").orEmpty())
-            }.trim()
-            val jsonText = responseText.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-            val translations = JSONObject(jsonText).optJSONArray("translations")
-                ?: throw IllegalStateException("صيغة رد Gemini غير صالحة")
-            if (translations.length() != texts.size) throw IllegalStateException("Gemini أعاد عدد ترجمات غير مطابق للنصوص")
-            val result = (0 until translations.length()).map { translations.optString(it, "").trim() }
+            val responseText = buildString { for (i in 0 until parts.length()) append(parts.optJSONObject(i)?.optString("text", "").orEmpty()) }.trim()
+            val cleaned = responseText.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+            val root = JSONObject(cleaned)
+            val translations = root.optJSONArray("translations") ?: throw IllegalStateException("صيغة رد Gemini غير صالحة")
+            if (translations.length() != expectedCount) throw IllegalStateException("Gemini أعاد عدد ترجمات غير مطابق للنصوص")
+            val result = (0 until translations.length()).map { i ->
+                if (translations.isNull(i) || translations.opt(i) !is String) throw IllegalStateException("عنصر ترجمة Gemini ليس نصًا")
+                translations.optString(i).trim()
+            }
             if (result.any { it.isBlank() }) throw IllegalStateException("Gemini أعاد ترجمة فارغة")
             return result
-        } finally {
-            connection.disconnect()
-            NetworkRequestRegistry.unregister(connection)
-        }
+        } finally { connection.disconnect(); NetworkRequestRegistry.unregister(connection) }
     }
+
 }

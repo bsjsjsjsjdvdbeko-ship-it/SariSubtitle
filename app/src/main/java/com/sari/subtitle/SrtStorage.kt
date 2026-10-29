@@ -50,7 +50,8 @@ class SrtStorage(private val context: Context) {
         sourceUrl: String? = null,
         sourceTitle: String? = null,
         localVideoUri: String? = null,
-        localVideoTitle: String? = null
+        localVideoTitle: String? = null,
+        preserveVersion: Boolean = false
     ): String? {
         if (srtText.isBlank()) return null
         var createdFile: File? = null
@@ -63,7 +64,7 @@ class SrtStorage(private val context: Context) {
             }
             val index = readLibraryIndex()
             val matchingIds = mutableListOf<String>()
-            if (!safeSource.isNullOrBlank()) {
+            if (!preserveVersion && !safeSource.isNullOrBlank()) {
                 val incomingCanonical = VideoUrlIdentity.canonicalKey(safeSource)
                 val incomingNormalized = VideoUrlIdentity.normalize(safeSource)
                 val keys = index.keys()

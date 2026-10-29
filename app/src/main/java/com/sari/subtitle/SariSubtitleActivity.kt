@@ -497,9 +497,6 @@ class SariSubtitleActivity : AppCompatActivity() {
             val srtText = storage.load(url) ?: return false
             val cues = SrtParser.parse(srtText.byteInputStream(Charsets.UTF_8))
             if (cues.isEmpty()) return false
-            // A parseable SRT is not necessarily a successful Arabic translation.
-            // Never restore a mostly English/Spanish cache as if it were Arabic subtitles.
-            if (looksUntranslatedForArabic(cues.map { it.text })) return false
             repo.setCues(cues)
             lastSrtText = srtText
             lastSrtUrl = url
@@ -509,16 +506,6 @@ class SariSubtitleActivity : AppCompatActivity() {
         } catch (_: Exception) {
             false
         }
-    }
-
-    private fun looksUntranslatedForArabic(texts: List<String>): Boolean {
-        val meaningful = texts.map { it.trim() }.filter { it.isNotBlank() && it.length > 2 }
-        if (meaningful.isEmpty()) return false
-        val arabic = Regex("[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]")
-        val latin = Regex("[A-Za-z]{3,}")
-        val arabicCues = meaningful.count { arabic.containsMatchIn(it) }
-        val foreignOnlyCues = meaningful.count { latin.containsMatchIn(it) && !arabic.containsMatchIn(it) }
-        return foreignOnlyCues >= 2 && foreignOnlyCues * 2 >= meaningful.size && arabicCues * 3 < meaningful.size
     }
 
     /**
@@ -852,46 +839,11 @@ class SariSubtitleActivity : AppCompatActivity() {
             return
         }
 
-        // If an earlier failed attempt left a parseable source-language SRT in cache,
-        // do not display it as Arabic. Offer a retry using that saved source text instead.
-        val cachedCandidate = storage.load(videoUrl)
-        val cachedCandidateCues = cachedCandidate?.let { runCatching { SrtParser.parse(it.byteInputStream(Charsets.UTF_8)) }.getOrNull() }
-        if (!cachedCandidate.isNullOrBlank() && !cachedCandidateCues.isNullOrEmpty() && looksUntranslatedForArabic(cachedCandidateCues.map { it.text })) {
-            androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle("الترجمة المحفوظة غير صحيحة")
-                .setMessage("الملف المحفوظ يبدو أنه ما زال باللغة الأصلية، لذلك لن أعرضه كترجمة عربية. يمكنك محاولة ترجمته مرة أخرى.")
-                .setNegativeButton("إلغاء", null)
-                .setPositiveButton("ترجمة مرة أخرى") { _, _ ->
-                    translateAndShowSrtAutomatically(videoUrl, cachedCandidate, "retry_${System.currentTimeMillis()}.srt", sourceTitle = currentVideoTitle())
-                }
-                .show()
-            statusText.text = "الترجمة المحفوظة لم تُعرض لأنها تبدو بلغة المصدر. اختر «ترجمة مرة أخرى» للمحاولة."
-            return
-        }
-
         // Cache-first: reuse a previously saved SRT before contacting any provider or site.
         // This avoids spending transcription quota when the same URL is opened again.
         if (restoreCachedSrt(videoUrl)) {
-            Toast.makeText(this, "تمت استعادة الترجمة المحفوظة بنجاح", Toast.LENGTH_LONG).show()
-            statusText.text = "تمت استعادة الترجمة المحفوظة لهذا الفيديو. يمكنك إعادة الترجمة إذا كانت النتيجة السابقة غير صحيحة."
-            androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle("تمت استعادة الترجمة المحفوظة بنجاح")
-                .setMessage("عُثر على ملف ترجمة محفوظ لهذا الفيديو. إذا كانت الترجمة السابقة غير صحيحة أو بقيت باللغة الأصلية، يمكنك محاولة ترجمتها مرة أخرى.")
-                .setNegativeButton("استخدام الترجمة المحفوظة", null)
-                .setPositiveButton("ترجمة مرة أخرى") { _, _ ->
-                    val retrySource = lastSrtText.orEmpty()
-                    if (retrySource.isBlank()) {
-                        Toast.makeText(this, "لا يوجد نص محفوظ لإعادة ترجمته", Toast.LENGTH_LONG).show()
-                    } else {
-                        translateAndShowSrtAutomatically(
-                            videoUrl = videoUrl,
-                            sourceSrt = retrySource,
-                            fileName = "retry_${System.currentTimeMillis()}.srt",
-                            sourceTitle = currentVideoTitle()
-                        )
-                    }
-                }
-                .show()
+            Toast.makeText(this, "تم تحميل الترجمة المحفوظة دون إعادة المعالجة", Toast.LENGTH_LONG).show()
+            statusText.text = "تمت استعادة الترجمة المحفوظة لهذا الفيديو. لم يتم استدعاء أي مزود ذكاء اصطناعي."
             return
         }
 
@@ -987,7 +939,8 @@ class SariSubtitleActivity : AppCompatActivity() {
                         "ar_${fileName.removeSuffix(".srt")}.srt", translated, cues.size, videoUrl,
                         sourceTitle = sourceTitle ?: currentVideoTitle(),
                         localVideoUri = localVideoUri,
-                        localVideoTitle = localVideoUri?.let { queryDisplayName(Uri.parse(it)) }
+                        localVideoTitle = localVideoUri?.let { queryDisplayName(Uri.parse(it)) },
+                        preserveVersion = true
                     ) != null
                     overlayOn = true
                     statusText.visibility = android.view.View.VISIBLE
@@ -1450,7 +1403,8 @@ class SariSubtitleActivity : AppCompatActivity() {
                     val translatedName = "ar_${originalName.substringAfterLast('/').removeSuffix(".srt").removeSuffix(".SRT")}.srt"
                     val libraryId = storage.saveLibraryItem(
                         translatedName, translated, translatedCues.size, currentUrl,
-                        sourceTitle = currentVideoTitle()
+                        sourceTitle = currentVideoTitle(),
+                        preserveVersion = true
                     )
                     val librarySaved = libraryId != null
                     if (libraryId != null) offerLocalVideoBinding(libraryId, "هل تريد ربط الترجمة بفيديو محلي الآن؟")
@@ -1468,6 +1422,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                         .setTitle("اكتملت الترجمة")
                         .setMessage("تمت ترجمة ${translatedCues.size} مقطعًا، وحُفظ الملف داخل التطبيق. يمكنك فتحه لاحقًا من «ملفاتي». هل تريد أيضًا تصدير نسخة إلى مجلد الهاتف؟")
                         .setNegativeButton("ليس الآن", null)
+                        .setNeutralButton("ترجمة مرة أخرى") { _, _ -> processTranslateSrt(uri) }
                         .setPositiveButton("تصدير نسخة") { _, _ ->
                             val create = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                                 addCategory(Intent.CATEGORY_OPENABLE)
@@ -2443,24 +2398,9 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                 }
             }
             actions.addView(localButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(4) })
-            // Keep playback of the currently linked local video separate from choosing a new file.
-            // This makes the Android document picker reachable even after a previous video was linked.
-            val changeLocalButton = Button(this).apply {
-                text = "📂 اختيار فيديو جديد"
-                isAllCaps = false
-                setOnClickListener {
-                    val savedSrt = storage.loadLibraryItem(item.id)
-                    if (savedSrt.isNullOrBlank()) {
-                        Toast.makeText(this@SariSubtitleActivity, "تعذّر فتح ملف الترجمة", Toast.LENGTH_LONG).show()
-                    } else {
-                        pickLocalVideoForLibraryItem(item.id)
-                    }
-                }
-            }
             row.addView(title)
             row.addView(details)
             row.addView(actions)
-            row.addView(changeLocalButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2) })
             row.setOnLongClickListener {
                 androidx.appcompat.app.AlertDialog.Builder(this)
                     .setTitle("حذف من ملفاتي؟")

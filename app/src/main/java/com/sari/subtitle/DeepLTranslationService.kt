@@ -20,24 +20,22 @@ object DeepLTranslationService {
         if (text.isBlank()) return text
         if (apiKey.isNotBlank()) {
             val deepL = tryDeepL(text, sourceLang, targetLang, apiKey).trim()
-            if (isUsableTranslation(text, deepL, sourceLang, targetLang)) return deepL
+            if (isUsableTranslation(text, deepL)) return deepL
         }
         val google = tryGoogleTranslate(text, targetLang).trim()
-        if (isUsableTranslation(text, google, sourceLang, targetLang)) return google
+        if (isUsableTranslation(text, google)) return google
         val memory = tryMyMemory(text, sourceLang, targetLang).trim()
-        if (isUsableTranslation(text, memory, sourceLang, targetLang)) return android.text.Html.fromHtml(memory, android.text.Html.FROM_HTML_MODE_LEGACY).toString()
+        if (isUsableTranslation(text, memory)) return android.text.Html.fromHtml(memory, android.text.Html.FROM_HTML_MODE_LEGACY).toString()
         throw IllegalStateException("تعذرت الترجمة عبر خدمات الترجمة المتاحة؛ تحقق من الاتصال وحدود الخدمات.")
     }
 
-    private fun isUsableTranslation(original: String, translated: String, sourceLang: String, targetLang: String): Boolean {
-        val result = translated.trim()
-        if (result.isBlank() || result.contains("???")) return false
-        if (!sourceLang.equals(targetLang, ignoreCase = true) && result.equals(original.trim(), ignoreCase = true)) return false
-        if (targetLang.equals("ar", ignoreCase = true) || targetLang.startsWith("ar-", ignoreCase = true)) {
-            val originalHasLatinWords = Regex("[A-Za-z]{3,}").containsMatchIn(original)
-            val hasArabic = Regex("[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]").containsMatchIn(result)
-            if (originalHasLatinWords && !hasArabic) return false
-        }
+    private fun isUsableTranslation(original: String, translated: String): Boolean {
+        if (translated.isBlank() || translated.contains("???")) return false
+        // This method is used only after a cue was routed for translation; do not accept an unchanged foreign sentence as success.
+        val latin = Regex("[A-Za-z]")
+        val arabic = Regex("[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]")
+        if (original.trim().length > 3 && original.trim().equals(translated.trim(), ignoreCase = true) &&
+            latin.containsMatchIn(original) && !arabic.containsMatchIn(original)) return false
         return true
     }
 
@@ -55,45 +53,73 @@ object DeepLTranslationService {
         onProgress: (Int, Int) -> Unit = { _, _ -> }
     ): String {
         val normalized = source.removePrefix("\uFEFF").replace("\r\n", "\n").replace('\r', '\n')
-        val blocks = normalized.trim().split(Regex("\\n[ \\t]*\\n"))
-
-        require(blocks.isNotEmpty() && blocks.any { timestampPattern.containsMatchIn(it) }) {
-            "الملف لا يبدو بصيغة SRT صحيحة"
-        }
-
-        val translatable = blocks.count { block ->
-            val lines = block.split('\n')
-            val ti = lines.indexOfFirst { timestampPattern.containsMatchIn(it) }
-            ti >= 0 && lines.drop(ti + 1).any { it.isNotBlank() }
-        }
-
-        var completed = 0
-        val output = ArrayList<String>(blocks.size)
-
-        for (block in blocks) {
+        val blocks = normalized.trim().split(Regex("\n[ \t]*\n"))
+        require(blocks.isNotEmpty() && blocks.any { timestampPattern.containsMatchIn(it) }) { "الملف لا يبدو بصيغة SRT صحيحة" }
+        data class Cue(val blockIndex: Int, val lines: MutableList<String>, val timeIndex: Int, val text: String)
+        val cues = blocks.mapIndexedNotNull { index, block ->
             val lines = block.split('\n').toMutableList()
             val timeIndex = lines.indexOfFirst { timestampPattern.containsMatchIn(it) }
-
-            if (timeIndex < 0 || lines.drop(timeIndex + 1).all { it.isBlank() }) {
-                output.add(block)
-                continue
+            if (timeIndex < 0 || lines.drop(timeIndex + 1).all { it.isBlank() }) null
+            else Cue(index, lines, timeIndex, lines.drop(timeIndex + 1).joinToString("\n").trim())
+        }
+        val output = blocks.toMutableList()
+        var completed = 0
+        for (batch in cues.chunked(8)) {
+            if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+            val deeplResults = if (apiKey.isNotBlank()) tryDeepLBatch(batch.map { it.text }, sourceLang, targetLang, apiKey) else null
+            for ((i, cue) in batch.withIndex()) {
+                if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+                val deepl = deeplResults?.getOrNull(i).orEmpty().trim()
+                var translated = deepl.takeIf { isUsableTranslation(cue.text, it) && it != cue.text }.orEmpty()
+                if (translated.isBlank()) {
+                    val google = tryGoogleTranslate(cue.text, targetLang).trim()
+                    translated = google.takeIf { isUsableTranslation(cue.text, it) && it != cue.text }.orEmpty()
+                }
+                if (translated.isBlank()) {
+                    val memory = tryMyMemory(cue.text, sourceLang, targetLang).trim()
+                    translated = memory.takeIf { isUsableTranslation(cue.text, it) && it != cue.text }
+                        ?.let { android.text.Html.fromHtml(it, android.text.Html.FROM_HTML_MODE_LEGACY).toString() }.orEmpty()
+                }
+                if (translated.isBlank()) throw IllegalStateException("تعذرت ترجمة المقطع ${cue.blockIndex + 1} عبر DeepL وGoogle وMyMemory")
+                while (cue.lines.size > cue.timeIndex + 1) cue.lines.removeAt(cue.lines.lastIndex)
+                cue.lines.add(translated)
+                output[cue.blockIndex] = cue.lines.joinToString("\n")
+                completed++
+                onProgress(completed, cues.size)
             }
-
-            val originalText = lines.drop(timeIndex + 1).joinToString("\n").trim()
-            // Never silently publish the source-language cue as the target-language subtitle.
-            // translateTextOnly tries DeepL, Google Translate and MyMemory, then throws on failure.
-            val translated = translateTextOnly(originalText, sourceLang, targetLang, apiKey)
-            if (!isUsableTranslation(originalText, translated, sourceLang, targetLang)) {
-                throw IllegalStateException("فشلت ترجمة المقطع رقم ${completed + 1} إلى $targetLang؛ لم يُعرض النص الأصلي كترجمة.")
-            }
-
-            while (lines.size > timeIndex + 1) lines.removeAt(lines.lastIndex)
-            lines.add(translated)
-            output.add(lines.joinToString("\n"))
-            completed++
-            onProgress(completed, translatable)
         }
         return output.joinToString("\n\n") + "\n"
+    }
+
+    /** Send up to eight text parameters in one DeepL request; response order matches request order. */
+    private fun tryDeepLBatch(texts: List<String>, sourceLang: String, targetLang: String, apiKey: String): List<String>? {
+        if (texts.isEmpty()) return emptyList()
+        var connection: HttpURLConnection? = null
+        return try {
+            val url = URL("https://api-free.deepl.com/v2/translate")
+            connection = NetworkRequestRegistry.register(url.openConnection() as HttpURLConnection)
+            connection.requestMethod = "POST"; connection.doOutput = true
+            connection.connectTimeout = 15000; connection.readTimeout = 30000
+            connection.setRequestProperty("Authorization", "DeepL-Auth-Key $apiKey")
+            connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            val source = sourceLang.uppercase().take(2)
+            val target = targetLang.uppercase().take(2)
+            val params = texts.joinToString("&") { "text=${URLEncoder.encode(it, "UTF-8")}" } +
+                "&source_lang=$source&target_lang=$target"
+            OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(params) }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) return null
+            val arr = JSONObject(body).optJSONArray("translations") ?: return null
+            if (arr.length() != texts.size) return null
+            (0 until arr.length()).map { arr.optJSONObject(it)?.optString("text", "").orEmpty() }.takeIf { values -> values.all { it.isNotBlank() } }
+        } catch (e: Exception) {
+            if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
+            null
+        } finally {
+            connection?.disconnect(); connection?.let { NetworkRequestRegistry.unregister(it) }
+        }
     }
 
     /**
@@ -127,6 +153,7 @@ object DeepLTranslationService {
             val translations = json.optJSONArray("translations") ?: return ""
             translations.optJSONObject(0)?.optString("text", "") ?: ""
         } catch (_: Exception) {
+            if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
             ""
         } finally {
             connection?.disconnect()
@@ -162,6 +189,7 @@ object DeepLTranslationService {
             }
             sb.toString()
         } catch (_: Exception) {
+            if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
             ""
         } finally {
             connection?.disconnect()
@@ -192,6 +220,7 @@ object DeepLTranslationService {
             if (json.optInt("responseStatus", 200) != 200) return ""
             json.optJSONObject("responseData")?.optString("translatedText", "") ?: ""
         } catch (_: Exception) {
+            if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
             ""
         } finally {
             connection?.disconnect()

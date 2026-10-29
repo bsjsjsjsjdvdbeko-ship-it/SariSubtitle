@@ -43,13 +43,45 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
         val choices = response.optJSONArray("choices") ?: throw IOException("OmniRoute لم يُرجع choices.")
         val content = choices.optJSONObject(0)?.optJSONObject("message")?.optString("content", "")?.trim().orEmpty()
         if (content.isBlank()) throw IOException("OmniRoute أعاد رد ترجمة فارغًا.")
-        val clean = content.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-        val arr = try { JSONObject(clean).optJSONArray("translations") } catch (_: Exception) { null }
-            ?: throw IOException("رد OmniRoute ليس JSON صالحًا لقائمة الترجمات.")
-        if (arr.length() != texts.size) throw IOException("OmniRoute أعاد عدد ترجمات غير مطابق للنصوص.")
-        val results = (0 until arr.length()).map { arr.optString(it, "").trim() }
+        val arr = parseTranslationsArray(content)
+            ?: throw IOException("رد OmniRoute لا يحتوي على JSON صالح لحقل translations؛ لم تُقبل أي نتيجة غير موثقة.")
+        if (arr.length() != texts.size) throw IOException("OmniRoute أعاد ${arr.length()} ترجمة بينما المطلوب ${texts.size}.")
+        val results = (0 until arr.length()).map { i ->
+            if (arr.isNull(i) || arr.opt(i) !is String) throw IOException("عنصر ترجمة OmniRoute رقم ${i + 1} ليس نصًا.")
+            arr.optString(i).trim()
+        }
         if (results.any { it.isBlank() }) throw IOException("OmniRoute أعاد ترجمة فارغة.")
+        if (targetLang.equals("ar", ignoreCase = true)) {
+            val arabic = Regex("[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]")
+            val latin = Regex("[A-Za-z]")
+            val unchangedForeign = texts.indices.firstOrNull { i ->
+                latin.containsMatchIn(texts[i]) && !arabic.containsMatchIn(texts[i]) &&
+                    !arabic.containsMatchIn(results[i]) && results[i].equals(texts[i].trim(), ignoreCase = true) &&
+                    texts[i].trim().length > 3
+            }
+            if (unchangedForeign != null) throw IOException("OmniRoute أعاد النص الأجنبي كما هو في المقطع ${unchangedForeign + 1}.")
+        }
         return results
+    }
+
+
+    /** Parses a real JSON envelope, tolerating only common surrounding fences/preamble. */
+    private fun parseTranslationsArray(raw: String): JSONArray? {
+        val cleaned = raw.trim()
+            .removePrefix("```json").removePrefix("```JSON").removePrefix("```")
+            .removeSuffix("```").trim()
+        val candidates = listOf(cleaned) + run {
+            val first = cleaned.indexOf('{')
+            val last = cleaned.lastIndexOf('}')
+            if (first >= 0 && last > first) listOf(cleaned.substring(first, last + 1)) else emptyList()
+        }
+        for (candidate in candidates.distinct()) {
+            try {
+                val root = JSONObject(candidate)
+                root.optJSONArray("translations")?.let { return it }
+            } catch (_: Exception) { /* try the next strictly JSON candidate */ }
+        }
+        return null
     }
 
     fun testConnection(): String {
