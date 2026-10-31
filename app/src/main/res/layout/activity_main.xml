@@ -7,13 +7,38 @@
     android:fitsSystemWindows="true">
 
     <!-- Bin Rawah exact visual home artwork. Interactive hit areas are transparent overlays below. -->
-    <ImageView
-        android:id="@+id/binRawahHomeArtwork"
+    <FrameLayout
+        android:id="@+id/binRawahHomeDesign"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:src="@drawable/binrawah_home"
-        android:scaleType="centerCrop"
-        android:contentDescription="بن رواح - Mohammed" />
+        android:layout_centerInParent="true"
+        android:clipChildren="true"
+        android:clipToPadding="true">
+
+        <ImageView
+            android:id="@+id/binRawahHomeArtwork"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:src="@drawable/binrawah_home"
+            android:scaleType="fitCenter"
+            android:contentDescription="بن رواح - Mohammed" />
+
+        <FrameLayout
+            android:id="@+id/binRawahHomeTouchLayer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clickable="false"
+            android:focusable="false">
+
+            <View android:id="@+id/homeStartHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
+            <View android:id="@+id/homeHistoryHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
+            <View android:id="@+id/homeFilesHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
+            <View android:id="@+id/homeSettingsHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
+            <View android:id="@+id/homeSettingsTileHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
+            <View android:id="@+id/homePremiumHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
+            <View android:id="@+id/homePremiumBadgeHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
+        </FrameLayout>
+    </FrameLayout>
 
 
     <!-- WebView كامل (95% من الشاشة) -->
@@ -321,24 +346,5 @@
 
     </LinearLayout>
 
-    <!-- Transparent hit areas positioned from Kotlin as percentages of the artwork. -->
-    <FrameLayout
-        android:id="@+id/binRawahHomeTouchLayer"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:clickable="false"
-        android:focusable="false"
-        android:elevation="24dp"
-        android:translationZ="24dp">
-
-        <View android:id="@+id/homeStartHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" />
-        <View android:id="@+id/homeHistoryHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" />
-        <View android:id="@+id/homeFilesHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" />
-        <View android:id="@+id/homeSettingsHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" />
-        <View android:id="@+id/homeSettingsTileHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" />
-        <View android:id="@+id/homePremiumHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" />
-        <View android:id="@+id/homePremiumBadgeHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" />
-        <View android:id="@+id/homeLogoHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="false" />
-    </FrameLayout>
 
 </RelativeLayout>

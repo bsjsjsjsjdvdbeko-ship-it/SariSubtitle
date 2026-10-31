@@ -160,8 +160,36 @@ class SariSubtitleActivity : AppCompatActivity() {
 
         // Bin Rawah visual home: keep the generated artwork visually untouched and
         // place real transparent hit areas over it. Existing app buttons/flows remain the source of truth.
+        val homeDesign = findViewById<android.view.View>(R.id.binRawahHomeDesign)
         val homeArtwork = findViewById<android.view.View>(R.id.binRawahHomeArtwork)
         val homeTouchLayer = findViewById<android.view.View>(R.id.binRawahHomeTouchLayer)
+
+        // Keep the artwork and its transparent controls in the exact same 941:1672
+        // coordinate space as the generated image. This removes centerCrop coordinate
+        // drift while preserving the visual design exactly.
+        homeDesign?.post {
+            val parent = homeDesign.parent as? android.view.View
+            val availableW = parent?.width ?: homeDesign.width
+            val availableH = parent?.height ?: homeDesign.height
+            if (availableW > 0 && availableH > 0) {
+                val imageAspect = 941.0 / 1672.0
+                val widthFromHeight = (availableH * imageAspect).toInt()
+                val targetW: Int
+                val targetH: Int
+                if (widthFromHeight <= availableW) {
+                    targetW = widthFromHeight
+                    targetH = availableH
+                } else {
+                    targetW = availableW
+                    targetH = (availableW / imageAspect).toInt()
+                }
+                val lp = homeDesign.layoutParams as android.widget.RelativeLayout.LayoutParams
+                lp.width = targetW
+                lp.height = targetH
+                lp.addRule(android.widget.RelativeLayout.CENTER_IN_PARENT, true)
+                homeDesign.layoutParams = lp
+            }
+        }
         fun enterFunctionalSurface() {
             homeTouchLayer?.visibility = android.view.View.GONE
             homeArtwork?.visibility = android.view.View.GONE
@@ -175,12 +203,10 @@ class SariSubtitleActivity : AppCompatActivity() {
             findViewById<Button>(R.id.menuButton)?.performClick()
         }
         findViewById<android.view.View>(R.id.homeHistoryHit)?.setOnClickListener {
-            enterFunctionalSurface()
-            startActivity(Intent(this@SariSubtitleActivity, OperationHistoryActivity::class.java))
+            findViewById<Button>(R.id.operationLogToggleButton)?.performClick()
         }
         findViewById<android.view.View>(R.id.homeFilesHit)?.setOnClickListener {
-            enterFunctionalSurface()
-            showSavedSubtitles()
+            findViewById<Button>(R.id.savedItemsButton)?.performClick()
         }
         fun openSettingsCenter(premiumFocus: Boolean = false) {
             startActivity(Intent(this@SariSubtitleActivity, SettingsCenterActivity::class.java).apply {
@@ -214,50 +240,33 @@ class SariSubtitleActivity : AppCompatActivity() {
         }
         // Position the transparent hit areas as percentages of the artwork, so the exact
         // generated composition remains aligned on phones with different screen sizes.
-        fun positionHomeHotspots() {
-            val w = homeTouchLayer?.width ?: return
-            val h = homeTouchLayer?.height ?: return
-            if (w <= 0 || h <= 0) return
-
-            // The artwork uses centerCrop. Calculate the real displayed image rectangle
-            // first, then map artwork-relative hit boxes into screen coordinates. This
-            // prevents the transparent buttons from drifting on tall/wide phones.
-            val imageWidth = 941.0
-            val imageHeight = 1672.0
-            val scale = maxOf(w / imageWidth, h / imageHeight)
-            val renderedWidth = imageWidth * scale
-            val renderedHeight = imageHeight * scale
-            val cropX = (w - renderedWidth) / 2.0
-            val cropY = (h - renderedHeight) / 2.0
-
+        homeTouchLayer?.addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
+            val w = right - left
+            val h = bottom - top
             fun place(id: Int, x: Double, y: Double, width: Double, height: Double) {
                 val v = findViewById<android.view.View>(id) ?: return
-                val left = cropX + renderedWidth * x
-                val top = cropY + renderedHeight * y
-                val right = cropX + renderedWidth * (x + width)
-                val bottom = cropY + renderedHeight * (y + height)
                 val lp = android.widget.FrameLayout.LayoutParams(
-                    (right - left).toInt().coerceAtLeast(1),
-                    (bottom - top).toInt().coerceAtLeast(1)
+                    (w * width).toInt().coerceAtLeast(1),
+                    (h * height).toInt().coerceAtLeast(1)
                 )
-                lp.leftMargin = left.toInt()
-                lp.topMargin = top.toInt()
+                lp.leftMargin = (w * x).toInt()
+                lp.topMargin = (h * y).toInt()
                 v.layoutParams = lp
             }
-
             place(R.id.homeStartHit, 0.12, 0.65, 0.76, 0.095)
             place(R.id.homeHistoryHit, 0.04, 0.755, 0.21, 0.115)
             place(R.id.homeFilesHit, 0.285, 0.755, 0.20, 0.115)
+            // Bottom settings tile.
             place(R.id.homeSettingsTileHit, 0.525, 0.755, 0.20, 0.115)
+            // Actual gear icon in the generated artwork (top-right).
+            // Keep a generous transparent touch target so the gear remains reliable
+            // after centerCrop/resizing on different phone aspect ratios.
             place(R.id.homeSettingsHit, 0.755, 0.025, 0.205, 0.145)
+            // Premium tile in the generated artwork (bottom-right).
             place(R.id.homePremiumHit, 0.765, 0.755, 0.205, 0.115)
+            // Premium badge in the generated artwork (top-left).
             place(R.id.homePremiumBadgeHit, 0.035, 0.055, 0.18, 0.095)
-            place(R.id.homeLogoHit, 0.10, 0.34, 0.80, 0.28)
         }
-        homeTouchLayer?.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            positionHomeHotspots()
-        }
-        homeTouchLayer?.post { positionHomeHotspots() }
 
         settings = SubtitleSettings(this)
         applyPreferredOrientation()
