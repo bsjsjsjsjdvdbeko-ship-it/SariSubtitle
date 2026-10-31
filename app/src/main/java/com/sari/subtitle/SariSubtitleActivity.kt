@@ -179,76 +179,87 @@ class SariSubtitleActivity : AppCompatActivity() {
             startActivity(Intent(this@SariSubtitleActivity, SettingsCenterActivity::class.java))
         }
 
-        findViewById<android.view.View>(R.id.homeStartHit)?.setOnClickListener {
-            enterFunctionalSurface()
-            findViewById<Button>(R.id.menuButton)?.performClick()
-        }
-        findViewById<android.view.View>(R.id.homeHistoryHit)?.setOnClickListener {
-            startActivity(Intent(this@SariSubtitleActivity, OperationHistoryActivity::class.java))
-        }
-        findViewById<android.view.View>(R.id.homeFilesHit)?.setOnClickListener {
-            showSavedSubtitles()
-        }
-        findViewById<android.view.View>(R.id.homeSettingsHit)?.setOnClickListener {
-            openSettingsCenter()
-        }
-        findViewById<android.view.View>(R.id.homeSettingsTileHit)?.setOnClickListener {
-            openSettingsCenter()
-        }
-        fun openPremiumCenter() {
-            startActivity(Intent(this@SariSubtitleActivity, SettingsCenterActivity::class.java).apply {
-                putExtra(SettingsCenterActivity.EXTRA_PREMIUM_FOCUS, true)
-            })
-        }
-        findViewById<android.view.View>(R.id.homePremiumHit)?.setOnClickListener { openPremiumCenter() }
-        findViewById<android.view.View>(R.id.homePremiumBadgeHit)?.setOnClickListener { openPremiumCenter() }
+        // One touch router for the artwork. This avoids overlapping transparent child
+        // views and ensures each screen location can trigger exactly one destination.
+        val homeRegions = linkedMapOf(
+            1 to android.graphics.RectF(0.100f, 0.645f, 0.900f, 0.750f), // main CTA
+            2 to android.graphics.RectF(0.000f, 0.755f, 0.250f, 0.890f), // history
+            3 to android.graphics.RectF(0.250f, 0.755f, 0.500f, 0.890f), // files
+            4 to android.graphics.RectF(0.500f, 0.755f, 0.750f, 0.890f), // settings tile
+            5 to android.graphics.RectF(0.750f, 0.755f, 1.000f, 0.890f), // premium tile
+            6 to android.graphics.RectF(0.020f, 0.045f, 0.210f, 0.135f), // premium badge
+            7 to android.graphics.RectF(0.780f, 0.045f, 0.890f, 0.135f)  // settings gear
+        )
 
-        fun positionHomeTargets() {
-            val layer = homeTouchLayer ?: return
-            val artwork = homeArtwork ?: return
-            val drawable = artwork.drawable ?: return
-            if (artwork.width <= 0 || artwork.height <= 0 || layer.width <= 0 || layer.height <= 0) return
+        fun hitRegionAt(layerX: Float, layerY: Float): Int? {
+            val artwork = homeArtwork ?: return null
+            val layer = homeTouchLayer ?: return null
+            val drawable = artwork.drawable ?: return null
+            if (drawable.intrinsicWidth <= 0 || drawable.intrinsicHeight <= 0) return null
 
-            // Map hit areas through ImageView's real CENTER_CROP matrix. This avoids
-            // touch targets drifting away from the artwork on different screen ratios,
-            // status-bar insets and device sizes.
-            val imageW = drawable.intrinsicWidth.toFloat().coerceAtLeast(1f)
-            val imageH = drawable.intrinsicHeight.toFloat().coerceAtLeast(1f)
-            val matrix = artwork.imageMatrix
-            val artworkRect = android.graphics.RectF()
+            val inverse = android.graphics.Matrix()
+            if (!artwork.imageMatrix.invert(inverse)) return null
 
-            // Coordinates are normalized against the original 941x1672 artwork.
-            fun place(id: Int, x: Float, y: Float, width: Float, height: Float) {
-                val v = findViewById<android.view.View>(id) ?: return
-                artworkRect.set(x * imageW, y * imageH, (x + width) * imageW, (y + height) * imageH)
-                matrix.mapRect(artworkRect)
-                val lp = android.widget.FrameLayout.LayoutParams(
-                    artworkRect.width().roundToInt().coerceAtLeast(dp(44)),
-                    artworkRect.height().roundToInt().coerceAtLeast(dp(44))
-                )
-                lp.leftMargin = (artwork.left + artworkRect.left).roundToInt()
-                lp.topMargin = (artwork.top + artworkRect.top).roundToInt()
-                v.layoutParams = lp
+            // Convert touch-layer coordinates into the ImageView's drawable coordinates.
+            val point = floatArrayOf(
+                layerX + layer.left - artwork.left - artwork.paddingLeft,
+                layerY + layer.top - artwork.top - artwork.paddingTop
+            )
+            inverse.mapPoints(point)
+            val nx = point[0] / drawable.intrinsicWidth.toFloat()
+            val ny = point[1] / drawable.intrinsicHeight.toFloat()
+            return homeRegions.entries.firstOrNull { it.value.contains(nx, ny) }?.key
+        }
+
+        fun dispatchHomeAction(action: Int) {
+            when (action) {
+                1 -> {
+                    enterFunctionalSurface()
+                    findViewById<Button>(R.id.menuButton)?.performClick()
+                }
+                2 -> startActivity(Intent(this@SariSubtitleActivity, OperationHistoryActivity::class.java))
+                3 -> showSavedSubtitles()
+                4, 7 -> openSettingsCenter()
+                5, 6 -> startActivity(Intent(this@SariSubtitleActivity, PremiumCenterActivity::class.java))
             }
-
-            // Main CTA: choose video link.
-            place(R.id.homeStartHit, 0.125f, 0.648f, 0.750f, 0.092f)
-            // Four bottom cards.
-            place(R.id.homeHistoryHit, 0.035f, 0.760f, 0.215f, 0.112f)
-            place(R.id.homeFilesHit, 0.274f, 0.760f, 0.208f, 0.112f)
-            place(R.id.homeSettingsTileHit, 0.510f, 0.760f, 0.208f, 0.112f)
-            place(R.id.homePremiumHit, 0.740f, 0.760f, 0.220f, 0.112f)
-            // Top controls.
-            place(R.id.homePremiumBadgeHit, 0.030f, 0.045f, 0.180f, 0.085f)
-            place(R.id.homeSettingsHit, 0.760f, 0.045f, 0.095f, 0.085f)
         }
 
-        homeTouchLayer?.bringToFront()
-        homeTouchLayer?.post { positionHomeTargets(); homeTouchLayer.bringToFront() }
-        homeArtwork.post { positionHomeTargets(); homeTouchLayer?.bringToFront() }
-        homeArtwork.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            positionHomeTargets()
-            homeTouchLayer?.bringToFront()
+        var pressedHomeAction: Int? = null
+        homeTouchLayer?.apply {
+            // The individual legacy hit views are deliberately disabled. Only this
+            // router receives touches, so two transparent views cannot compete.
+            for (id in intArrayOf(
+                R.id.homeStartHit, R.id.homeHistoryHit, R.id.homeFilesHit,
+                R.id.homeSettingsHit, R.id.homeSettingsTileHit,
+                R.id.homePremiumHit, R.id.homePremiumBadgeHit
+            )) {
+                findViewById<android.view.View>(id)?.apply {
+                    isClickable = false
+                    isFocusable = false
+                }
+            }
+            isClickable = true
+            setOnTouchListener { _, event ->
+                when (event.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        pressedHomeAction = hitRegionAt(event.x, event.y)
+                        pressedHomeAction != null
+                    }
+                    android.view.MotionEvent.ACTION_UP -> {
+                        val releasedAction = hitRegionAt(event.x, event.y)
+                        val shouldDispatch = pressedHomeAction != null && pressedHomeAction == releasedAction
+                        pressedHomeAction = null
+                        if (shouldDispatch) dispatchHomeAction(releasedAction!!)
+                        shouldDispatch
+                    }
+                    android.view.MotionEvent.ACTION_CANCEL -> {
+                        pressedHomeAction = null
+                        true
+                    }
+                    else -> pressedHomeAction != null
+                }
+            }
+            bringToFront()
         }
 
         settings = SubtitleSettings(this)

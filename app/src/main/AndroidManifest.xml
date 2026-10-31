@@ -31,6 +31,7 @@
 
         <activity android:name="com.sari.subtitle.OperationHistoryActivity" android:exported="false" />
         <activity android:name="com.sari.subtitle.SettingsCenterActivity" android:exported="false" />
+        <activity android:name="com.sari.subtitle.PremiumCenterActivity" android:exported="false" />
         <activity android:name="com.sari.subtitle.ProviderCenterActivity" android:exported="false" />
         <activity android:name="com.sari.subtitle.ProviderBenchmarkCenterActivity" android:exported="false" />
         <activity android:name="com.sari.subtitle.ProviderDecisionDashboardActivity" android:exported="false" />
