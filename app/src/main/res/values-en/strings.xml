@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">بن رواح</string>
+    <string name="hint_url">Paste a video link here…</string>
+    <string name="btn_load">Open</string>
+    <string name="btn_settings">Settings</string>
+    <string name="btn_check_time">Check timing</string>
+    <string name="btn_reload_x">X</string>
+    <string name="status_ready">Ready</string>
+    <string name="status_loading">Loading…</string>
+    <string name="operation_log_ready">Activity log: Ready</string>
+    <string name="btn_history">History</string>
+    <string name="btn_start_translation">Start translation</string>
+    <string name="btn_subtitle_file">Subtitle file</string>
+    <string name="btn_dubbing">Dubbing</string>
+    <string name="btn_stop_dubbing">Stop dubbing</string>
+    <string name="btn_export_dubbing">Export dub</string>
+    <string name="btn_my_files">My files</string>
+    <string name="desc_start_translation">Start translating the current or copied video link</string>
+    <string name="desc_subtitle_file">Choose a subtitle file to detect its language, translate, or view it</string>
+    <string name="desc_dubbing">Toggle dubbing; long press to show or hide written subtitles</string>
+    <string name="desc_export_dubbing">Create a WAV dubbing file while preserving SRT timings</string>
+    <string name="desc_my_files">Open or delete saved subtitle files</string>
+
+    <!-- Local media player -->
+    <string name="local_player_title">Local video player</string>
+    <string name="local_player_no_subtitles">No valid subtitles are associated with this video</string>
+    <string name="local_player_back_10">Back 10 seconds</string>
+    <string name="local_player_toggle">Play/Pause</string>
+    <string name="local_player_forward_10">Forward 10 seconds</string>
+    <string name="local_player_invalid_uri">Cannot open this file: the local video URI is invalid.</string>
+    <string name="local_player_open_failed">Unable to open this file.</string>
+    <string name="local_player_play_failed">Unable to play this file.</string>
+    <string name="local_player_video_failed">Unable to open the video. Check file access and supported format.</string>
+    <string name="local_player_unsupported">Unable to play this video; it may be damaged or in an unsupported format.</string>
+    <string name="local_player_init_failed">The video player could not be initialized. Try another video file.</string>
+    <string name="local_player_seek_failed">Unable to seek in the video</string>
+    <string name="local_player_toggle_failed">Unable to play the video</string>
+    <string name="desc_rotation">Rotate screen between landscape and portrait</string>
+</resources>
