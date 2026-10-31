@@ -34,6 +34,8 @@ import android.widget.ListView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.EditText
+import android.widget.ImageView
+import android.graphics.drawable.Drawable
 import android.widget.Toast
 import android.view.View
 import android.view.Gravity
@@ -158,115 +160,86 @@ class SariSubtitleActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Bin Rawah visual home: keep the generated artwork visually untouched and
-        // place real transparent hit areas over it. Existing app buttons/flows remain the source of truth.
-        val homeDesign = findViewById<android.view.View>(R.id.binRawahHomeDesign)
-        val homeArtwork = findViewById<android.view.View>(R.id.binRawahHomeArtwork)
-        val homeTouchLayer = findViewById<android.view.View>(R.id.binRawahHomeTouchLayer)
+        // Bin Rawah home: keep the exact artwork, but use real Android Button views for interaction.
+        // The artwork remains the visual source of truth; buttons are transparent and positioned
+        // from the actual centerCrop image rectangle, so touch coordinates stay aligned.
+        val homeCanvas = findViewById<android.widget.FrameLayout>(R.id.binRawahHomeCanvas)
+        val homeArtwork = findViewById<ImageView>(R.id.binRawahHomeArtwork)
 
-        // Keep the artwork and its transparent controls in the exact same 941:1672
-        // coordinate space as the generated image. This removes centerCrop coordinate
-        // drift while preserving the visual design exactly.
-        homeDesign?.post {
-            val parent = homeDesign.parent as? android.view.View
-            val availableW = parent?.width ?: homeDesign.width
-            val availableH = parent?.height ?: homeDesign.height
-            if (availableW > 0 && availableH > 0) {
-                val imageAspect = 941.0 / 1672.0
-                val widthFromHeight = (availableH * imageAspect).toInt()
-                val targetW: Int
-                val targetH: Int
-                if (widthFromHeight <= availableW) {
-                    targetW = widthFromHeight
-                    targetH = availableH
-                } else {
-                    targetW = availableW
-                    targetH = (availableW / imageAspect).toInt()
-                }
-                val lp = homeDesign.layoutParams as android.widget.RelativeLayout.LayoutParams
-                lp.width = targetW
-                lp.height = targetH
-                lp.addRule(android.widget.RelativeLayout.CENTER_IN_PARENT, -1)
-                homeDesign.layoutParams = lp
-            }
-        }
         fun enterFunctionalSurface() {
-            homeTouchLayer?.visibility = android.view.View.GONE
-            homeArtwork?.visibility = android.view.View.GONE
-            findViewById<android.view.View>(R.id.webView)?.visibility = android.view.View.VISIBLE
-            findViewById<android.view.View>(R.id.webContainer)?.visibility = android.view.View.VISIBLE
-            findViewById<android.view.View>(R.id.topBar)?.visibility = android.view.View.VISIBLE
-            findViewById<android.view.View>(R.id.bottomBar)?.visibility = android.view.View.VISIBLE
+            homeCanvas?.visibility = View.GONE
+            findViewById<View>(R.id.webView)?.visibility = View.VISIBLE
+            findViewById<View>(R.id.webContainer)?.visibility = View.VISIBLE
+            findViewById<View>(R.id.topBar)?.visibility = View.VISIBLE
+            findViewById<View>(R.id.bottomBar)?.visibility = View.VISIBLE
         }
-        findViewById<android.view.View>(R.id.homeStartHit)?.setOnClickListener {
+
+        fun openSettingsCenter() {
+            startActivity(Intent(this@SariSubtitleActivity, SettingsCenterActivity::class.java))
+        }
+
+        findViewById<Button>(R.id.homeStartButton).setOnClickListener {
             enterFunctionalSurface()
             findViewById<Button>(R.id.menuButton)?.performClick()
         }
-        findViewById<android.view.View>(R.id.homeHistoryHit)?.setOnClickListener {
-            findViewById<Button>(R.id.operationLogToggleButton)?.performClick()
+        findViewById<Button>(R.id.homeHistoryButton).setOnClickListener {
+            startActivity(Intent(this@SariSubtitleActivity, OperationHistoryActivity::class.java))
         }
-        findViewById<android.view.View>(R.id.homeFilesHit)?.setOnClickListener {
-            findViewById<Button>(R.id.savedItemsButton)?.performClick()
+        findViewById<Button>(R.id.homeFilesButton).setOnClickListener {
+            showSavedSubtitles()
         }
-        fun openSettingsCenter(premiumFocus: Boolean = false) {
-            startActivity(Intent(this@SariSubtitleActivity, SettingsCenterActivity::class.java).apply {
-                putExtra(SettingsCenterActivity.EXTRA_PREMIUM_FOCUS, premiumFocus)
-            })
+        findViewById<Button>(R.id.homeSettingsButton).setOnClickListener {
+            openSettingsCenter()
         }
-        // The generated artwork has TWO settings entry points: the small gear at the top
-        // and the settings tile near the bottom. Both intentionally open the same real
-        // SettingsCenterActivity so no legacy setting store is duplicated.
-        findViewById<android.view.View>(R.id.homeSettingsHit)?.setOnClickListener {
-            openSettingsCenter(false)
+        findViewById<Button>(R.id.homeSettingsGearButton).setOnClickListener {
+            openSettingsCenter()
         }
-        findViewById<android.view.View>(R.id.homeSettingsTileHit)?.setOnClickListener {
-            openSettingsCenter(false)
+        findViewById<Button>(R.id.homePremiumButton).setOnClickListener {
+            Toast.makeText(this@SariSubtitleActivity, "النسخة المميزة — قريباً", Toast.LENGTH_SHORT).show()
         }
-        // Premium is intentionally separate from Settings. The upgrade/purchase
-        // flow is not enabled yet, so show a clear "قريباً" message only.
-        // This does not change any existing translation/video/settings behavior.
-        fun showPremiumComingSoon() {
-            Toast.makeText(
-                this@SariSubtitleActivity,
-                "النسخة المميزة — قريباً",
-                Toast.LENGTH_LONG
-            ).show()
+        findViewById<Button>(R.id.homePremiumBadgeButton).setOnClickListener {
+            Toast.makeText(this@SariSubtitleActivity, "النسخة المميزة — قريباً", Toast.LENGTH_SHORT).show()
         }
-        findViewById<android.view.View>(R.id.homePremiumHit)?.setOnClickListener {
-            showPremiumComingSoon()
-        }
-        findViewById<android.view.View>(R.id.homePremiumBadgeHit)?.setOnClickListener {
-            showPremiumComingSoon()
-        }
-        // Position the transparent hit areas as percentages of the artwork, so the exact
-        // generated composition remains aligned on phones with different screen sizes.
-        homeTouchLayer?.addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
-            val w = right - left
-            val h = bottom - top
+
+        fun layoutHomeButtons() {
+            val drawable: Drawable = homeArtwork.drawable ?: return
+            val iw = drawable.intrinsicWidth.toFloat()
+            val ih = drawable.intrinsicHeight.toFloat()
+            val vw = homeArtwork.width.toFloat()
+            val vh = homeArtwork.height.toFloat()
+            if (iw <= 0f || ih <= 0f || vw <= 0f || vh <= 0f) return
+
+            // Exact centerCrop geometry used by ImageView.
+            val scale = maxOf(vw / iw, vh / ih)
+            val displayedW = iw * scale
+            val displayedH = ih * scale
+            val left = (vw - displayedW) / 2f
+            val top = (vh - displayedH) / 2f
+
             fun place(id: Int, x: Double, y: Double, width: Double, height: Double) {
-                val v = findViewById<android.view.View>(id) ?: return
+                val button = findViewById<Button>(id) ?: return
                 val lp = android.widget.FrameLayout.LayoutParams(
-                    (w * width).toInt().coerceAtLeast(1),
-                    (h * height).toInt().coerceAtLeast(1)
+                    (displayedW * width).toInt().coerceAtLeast(1),
+                    (displayedH * height).toInt().coerceAtLeast(1)
                 )
-                lp.leftMargin = (w * x).toInt()
-                lp.topMargin = (h * y).toInt()
-                v.layoutParams = lp
+                lp.leftMargin = (left + displayedW * x).toInt()
+                lp.topMargin = (top + displayedH * y).toInt()
+                button.layoutParams = lp
+                button.bringToFront()
             }
-            place(R.id.homeStartHit, 0.12, 0.65, 0.76, 0.095)
-            place(R.id.homeHistoryHit, 0.04, 0.755, 0.21, 0.115)
-            place(R.id.homeFilesHit, 0.285, 0.755, 0.20, 0.115)
-            // Bottom settings tile.
-            place(R.id.homeSettingsTileHit, 0.525, 0.755, 0.20, 0.115)
-            // Actual gear icon in the generated artwork (top-right).
-            // Keep a generous transparent touch target so the gear remains reliable
-            // after centerCrop/resizing on different phone aspect ratios.
-            place(R.id.homeSettingsHit, 0.755, 0.025, 0.205, 0.145)
-            // Premium tile in the generated artwork (bottom-right).
-            place(R.id.homePremiumHit, 0.765, 0.755, 0.205, 0.115)
-            // Premium badge in the generated artwork (top-left).
-            place(R.id.homePremiumBadgeHit, 0.035, 0.055, 0.18, 0.095)
+
+            // Same visual regions as the approved artwork; only the implementation changed.
+            place(R.id.homeStartButton, 0.12, 0.65, 0.76, 0.095)
+            place(R.id.homeHistoryButton, 0.04, 0.755, 0.21, 0.115)
+            place(R.id.homeFilesButton, 0.285, 0.755, 0.20, 0.115)
+            place(R.id.homeSettingsButton, 0.525, 0.755, 0.20, 0.115)
+            place(R.id.homeSettingsGearButton, 0.805, 0.055, 0.125, 0.095)
+            place(R.id.homePremiumButton, 0.765, 0.755, 0.205, 0.115)
+            place(R.id.homePremiumBadgeButton, 0.035, 0.055, 0.18, 0.095)
         }
+
+        homeArtwork.post { layoutHomeButtons() }
+        homeArtwork.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layoutHomeButtons() }
 
         settings = SubtitleSettings(this)
         applyPreferredOrientation()
