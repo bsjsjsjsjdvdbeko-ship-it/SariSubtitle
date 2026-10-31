@@ -180,8 +180,28 @@ class SariSubtitleActivity : AppCompatActivity() {
         findViewById<android.view.View>(R.id.homeFilesHit)?.setOnClickListener {
             findViewById<Button>(R.id.savedItemsButton)?.performClick()
         }
+        fun openSettingsCenter(premiumFocus: Boolean = false) {
+            startActivity(Intent(this@SariSubtitleActivity, SettingsCenterActivity::class.java).apply {
+                putExtra(SettingsCenterActivity.EXTRA_PREMIUM_FOCUS, premiumFocus)
+            })
+        }
+        // The generated artwork has TWO settings entry points: the small gear at the top
+        // and the settings tile near the bottom. Both intentionally open the same real
+        // SettingsCenterActivity so no legacy setting store is duplicated.
         findViewById<android.view.View>(R.id.homeSettingsHit)?.setOnClickListener {
-            findViewById<Button>(R.id.settingsButton)?.performClick()
+            openSettingsCenter(false)
+        }
+        findViewById<android.view.View>(R.id.homeSettingsTileHit)?.setOnClickListener {
+            openSettingsCenter(false)
+        }
+        // Premium is a visual hub over the existing features; it does not replace or
+        // disable any previous behavior. It simply opens the same settings center with
+        // the premium section highlighted.
+        findViewById<android.view.View>(R.id.homePremiumHit)?.setOnClickListener {
+            openSettingsCenter(true)
+        }
+        findViewById<android.view.View>(R.id.homePremiumBadgeHit)?.setOnClickListener {
+            openSettingsCenter(true)
         }
         // Position the transparent hit areas as percentages of the artwork, so the exact
         // generated composition remains aligned on phones with different screen sizes.
@@ -201,7 +221,14 @@ class SariSubtitleActivity : AppCompatActivity() {
             place(R.id.homeStartHit, 0.12, 0.65, 0.76, 0.095)
             place(R.id.homeHistoryHit, 0.04, 0.755, 0.21, 0.115)
             place(R.id.homeFilesHit, 0.285, 0.755, 0.20, 0.115)
-            place(R.id.homeSettingsHit, 0.525, 0.755, 0.20, 0.115)
+            // Bottom settings tile.
+            place(R.id.homeSettingsTileHit, 0.525, 0.755, 0.20, 0.115)
+            // Actual gear icon in the generated artwork (top-right).
+            place(R.id.homeSettingsHit, 0.805, 0.055, 0.125, 0.095)
+            // Premium tile in the generated artwork (bottom-right).
+            place(R.id.homePremiumHit, 0.765, 0.755, 0.205, 0.115)
+            // Premium badge in the generated artwork (top-left).
+            place(R.id.homePremiumBadgeHit, 0.035, 0.055, 0.18, 0.095)
             place(R.id.homeLogoHit, 0.10, 0.34, 0.80, 0.28)
         }
 
@@ -497,6 +524,13 @@ class SariSubtitleActivity : AppCompatActivity() {
         }
 
         startPolling()
+        val openSavedItems = intent.getBooleanExtra("open_saved_items", false)
+        if (openSavedItems) {
+            // Navigation helper from the new Settings Center. It only opens the existing
+            // saved-items screen; it does not alter any translation/video state.
+            window.decorView.post { showSavedSubtitles() }
+        }
+
         val sharedUrl = extractSharedUrl(intent)
         if (sharedUrl != null) {
             urlInput.setText(sharedUrl)

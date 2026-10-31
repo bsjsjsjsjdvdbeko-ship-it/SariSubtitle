@@ -332,6 +332,9 @@
         <View android:id="@+id/homeHistoryHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
         <View android:id="@+id/homeFilesHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
         <View android:id="@+id/homeSettingsHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
+        <View android:id="@+id/homeSettingsTileHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
+        <View android:id="@+id/homePremiumHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
+        <View android:id="@+id/homePremiumBadgeHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
         <View android:id="@+id/homeLogoHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="false" />
     </FrameLayout>
 
