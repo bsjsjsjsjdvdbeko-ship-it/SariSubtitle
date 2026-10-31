@@ -186,7 +186,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                 val lp = homeDesign.layoutParams as android.widget.RelativeLayout.LayoutParams
                 lp.width = targetW
                 lp.height = targetH
-                lp.addRule(android.widget.RelativeLayout.CENTER_IN_PARENT, true)
+                lp.addRule(android.widget.RelativeLayout.CENTER_IN_PARENT, -1)
                 homeDesign.layoutParams = lp
             }
         }
