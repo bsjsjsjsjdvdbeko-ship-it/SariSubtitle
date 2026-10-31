@@ -194,14 +194,21 @@ class SariSubtitleActivity : AppCompatActivity() {
         findViewById<android.view.View>(R.id.homeSettingsTileHit)?.setOnClickListener {
             openSettingsCenter(false)
         }
-        // Premium is a visual hub over the existing features; it does not replace or
-        // disable any previous behavior. It simply opens the same settings center with
-        // the premium section highlighted.
+        // Premium is intentionally separate from Settings. The upgrade/purchase
+        // flow is not enabled yet, so show a clear "قريباً" message only.
+        // This does not change any existing translation/video/settings behavior.
+        fun showPremiumComingSoon() {
+            Toast.makeText(
+                this@SariSubtitleActivity,
+                "النسخة المميزة — قريباً",
+                Toast.LENGTH_LONG
+            ).show()
+        }
         findViewById<android.view.View>(R.id.homePremiumHit)?.setOnClickListener {
-            openSettingsCenter(true)
+            showPremiumComingSoon()
         }
         findViewById<android.view.View>(R.id.homePremiumBadgeHit)?.setOnClickListener {
-            openSettingsCenter(true)
+            showPremiumComingSoon()
         }
         // Position the transparent hit areas as percentages of the artwork, so the exact
         // generated composition remains aligned on phones with different screen sizes.
@@ -224,7 +231,9 @@ class SariSubtitleActivity : AppCompatActivity() {
             // Bottom settings tile.
             place(R.id.homeSettingsTileHit, 0.525, 0.755, 0.20, 0.115)
             // Actual gear icon in the generated artwork (top-right).
-            place(R.id.homeSettingsHit, 0.805, 0.055, 0.125, 0.095)
+            // Keep a generous transparent touch target so the gear remains reliable
+            // after centerCrop/resizing on different phone aspect ratios.
+            place(R.id.homeSettingsHit, 0.755, 0.025, 0.205, 0.145)
             // Premium tile in the generated artwork (bottom-right).
             place(R.id.homePremiumHit, 0.765, 0.755, 0.205, 0.115)
             // Premium badge in the generated artwork (top-left).
