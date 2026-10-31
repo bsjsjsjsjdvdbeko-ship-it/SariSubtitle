@@ -1,4 +1,4 @@
-name: Build Sari Subtitle - TEST UI v9
+name: Build Sari Subtitle APK
 
 on:
   workflow_dispatch:

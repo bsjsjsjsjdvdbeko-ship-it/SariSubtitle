@@ -6,6 +6,16 @@
     android:layoutDirection="locale"
     android:fitsSystemWindows="true">
 
+    <!-- Bin Rawah exact visual home artwork. Interactive hit areas are transparent overlays below. -->
+    <ImageView
+        android:id="@+id/binRawahHomeArtwork"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:src="@drawable/binrawah_home"
+        android:scaleType="centerCrop"
+        android:contentDescription="بن رواح - Mohammed" />
+
+
     <!-- WebView كامل (95% من الشاشة) -->
     <WebView
         android:id="@+id/webView"
@@ -311,90 +321,21 @@
 
     </LinearLayout>
 
-    <!-- Real Android controls over the same artwork. The controls are transparent, so the visual design is unchanged. -->
+    <!-- Transparent hit areas positioned from Kotlin as percentages of the artwork. -->
     <FrameLayout
-        android:id="@+id/binRawahHomeCanvas"
+        android:id="@+id/binRawahHomeTouchLayer"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:clipChildren="false">
+        android:clickable="false">
 
-        <ImageView
-            android:id="@+id/binRawahHomeArtwork"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:src="@drawable/binrawah_home"
-            android:scaleType="centerCrop"
-            android:contentDescription="بن رواح - Mohammed" />
-
-        <Button
-            android:id="@+id/homeStartButton"
-            android:layout_width="1dp"
-            android:layout_height="1dp"
-            android:background="@android:color/transparent"
-            android:text=""
-            android:clickable="true"
-            android:focusable="true"
-            android:contentDescription="اختيار رابط الفيديو" />
-
-        <Button
-            android:id="@+id/homeHistoryButton"
-            android:layout_width="1dp"
-            android:layout_height="1dp"
-            android:background="@android:color/transparent"
-            android:text=""
-            android:clickable="true"
-            android:focusable="true"
-            android:contentDescription="سجل الترجمة" />
-
-        <Button
-            android:id="@+id/homeFilesButton"
-            android:layout_width="1dp"
-            android:layout_height="1dp"
-            android:background="@android:color/transparent"
-            android:text=""
-            android:clickable="true"
-            android:focusable="true"
-            android:contentDescription="ملفاتي" />
-
-        <Button
-            android:id="@+id/homeSettingsButton"
-            android:layout_width="1dp"
-            android:layout_height="1dp"
-            android:background="@android:color/transparent"
-            android:text=""
-            android:clickable="true"
-            android:focusable="true"
-            android:contentDescription="الإعدادات" />
-
-        <Button
-            android:id="@+id/homeSettingsGearButton"
-            android:layout_width="1dp"
-            android:layout_height="1dp"
-            android:background="@android:color/transparent"
-            android:text=""
-            android:clickable="true"
-            android:focusable="true"
-            android:contentDescription="الإعدادات" />
-
-        <Button
-            android:id="@+id/homePremiumButton"
-            android:layout_width="1dp"
-            android:layout_height="1dp"
-            android:background="@android:color/transparent"
-            android:text=""
-            android:clickable="true"
-            android:focusable="true"
-            android:contentDescription="النسخة المميزة" />
-
-        <Button
-            android:id="@+id/homePremiumBadgeButton"
-            android:layout_width="1dp"
-            android:layout_height="1dp"
-            android:background="@android:color/transparent"
-            android:text=""
-            android:clickable="true"
-            android:focusable="true"
-            android:contentDescription="النسخة المميزة" />
+        <View android:id="@+id/homeStartHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homeHistoryHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homeFilesHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homeSettingsHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homeSettingsTileHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homePremiumHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homePremiumBadgeHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homeLogoHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="false" />
     </FrameLayout>
 
 </RelativeLayout>
