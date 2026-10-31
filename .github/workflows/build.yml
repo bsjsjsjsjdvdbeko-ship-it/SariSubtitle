@@ -23,11 +23,12 @@ jobs:
 
     - name: Decode Keystore
       run: |
-        echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > release.keystore
+        mkdir -p keystore
+        echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > keystore/sari.keystore
 
     - name: Build with Gradle
       env:
-        KEYSTORE_PATH: release.keystore
+        KEYSTORE_PATH: ${{ github.workspace }}/keystore/sari.keystore
         KEYSTORE_STORE_PASSWORD: ${{ secrets.KEYSTORE_STORE_PASSWORD }}
         KEYSTORE_KEY_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
         KEYSTORE_KEY_PASSWORD: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
