@@ -1,0 +1,341 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/sari_background"
+    android:layoutDirection="locale"
+    android:fitsSystemWindows="true">
+
+    <!-- Bin Rawah exact visual home artwork. Interactive hit areas are transparent overlays below. -->
+    <ImageView
+        android:id="@+id/binRawahHomeArtwork"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:src="@drawable/binrawah_home"
+        android:scaleType="centerCrop"
+        android:contentDescription="بن رواح - Mohammed" />
+
+
+    <!-- WebView كامل (95% من الشاشة) -->
+    <WebView
+        android:id="@+id/webView"
+        android:visibility="gone"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_above="@id/bottomBar"
+        android:layout_below="@id/topBar" />
+
+    <!-- SubtitleOverlay فوق WebView -->
+    <FrameLayout
+        android:id="@+id/webContainer"
+        android:visibility="gone"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_above="@id/bottomBar"
+        android:layout_below="@id/topBar">
+
+        <com.sari.subtitle.SubtitleOverlay
+            android:id="@+id/subtitleOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+    </FrameLayout>
+
+    <!-- الشريط العلوي (رفيع) -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:visibility="gone"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:gravity="center_vertical"
+        android:background="@drawable/bg_sari_topbar">
+
+        <EditText
+            android:id="@+id/urlInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="48dp"
+            android:hint="@string/hint_url"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="11dp"
+            android:paddingBottom="11dp"
+            android:background="@drawable/bg_sari_input"
+            android:imeOptions="actionGo"
+            android:inputType="textUri"
+            android:singleLine="true"
+            android:textSize="14sp"
+            android:textColor="@color/sari_text_primary"
+            android:textColorHint="@color/sari_text_muted" />
+
+        <Button
+            android:textAllCaps="false"
+            android:id="@+id/loadButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:text="@string/btn_load"
+            android:background="@drawable/bg_sari_button_primary"
+            android:textColor="@color/sari_on_accent"
+            android:minHeight="44dp"
+            android:layout_marginStart="6dp" />
+
+        <Button
+            android:textAllCaps="false"
+            android:id="@+id/settingsButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="18sp"
+            android:text="⚙"
+            android:contentDescription="@string/btn_settings"
+            android:background="@drawable/bg_sari_button_secondary"
+            android:textColor="@color/sari_text_primary"
+            android:minWidth="44dp"
+            android:minHeight="44dp"
+            android:layout_marginStart="4dp" />
+
+    </LinearLayout>
+
+    <!-- شريط الحالة (شفاف) -->
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_above="@+id/bottomBar"
+        android:padding="6dp"
+        android:fontFamily="sans"
+        android:textSize="12sp"
+        android:textColor="@color/sari_text_primary"
+        android:maxLines="3"
+        android:background="@drawable/bg_sari_status"
+        android:visibility="gone"
+        android:text="@string/status_ready" />
+
+    <!-- Stage 26: live operation status and one-tap full history -->
+    <LinearLayout
+        android:id="@+id/operationLogPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_above="@id/bottomBar"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="10dp"
+        android:layout_marginBottom="4dp"
+        android:visibility="gone"
+        android:background="@drawable/bg_sari_panel">
+        <TextView
+            android:id="@+id/operationLogText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:text="@string/operation_log_ready"
+            android:textColor="@color/sari_text_primary"
+            android:textSize="11sp"
+            android:maxLines="2" />
+        <Button
+            android:textAllCaps="false"
+            android:id="@+id/operationLogButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minHeight="32dp"
+            android:minWidth="64dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:textSize="10sp"
+            android:text="@string/btn_history"
+            android:background="@drawable/bg_sari_button_secondary"
+            android:textColor="@color/sari_text_primary" />
+    </LinearLayout>
+
+    <!-- Primary action + compact secondary actions. Existing view IDs remain stable. -->
+    <LinearLayout
+        android:id="@+id/bottomBar"
+        android:visibility="gone"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:orientation="vertical"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:background="@drawable/bg_sari_bottombar">
+
+        <Button
+            android:textAllCaps="false"
+            android:id="@+id/menuButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:layout_marginBottom="8dp"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:text="@string/btn_start_translation"
+            android:background="@drawable/bg_sari_button_primary"
+            android:textColor="@color/sari_on_accent"
+            android:contentDescription="@string/desc_start_translation" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layoutDirection="locale">
+
+            <Button
+                android:textAllCaps="false"
+                android:id="@+id/loadSrtButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1.05"
+                android:minHeight="46dp"
+                android:layout_marginEnd="3dp"
+                android:textSize="11sp"
+                android:text="@string/btn_subtitle_file"
+                android:background="@drawable/bg_sari_button_secondary"
+                android:textColor="@color/sari_text_primary"
+                android:contentDescription="@string/desc_subtitle_file" />
+
+            <Button
+                android:textAllCaps="false"
+                android:id="@+id/dubbingButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.8"
+                android:minHeight="46dp"
+                android:layout_marginHorizontal="3dp"
+                android:textSize="11sp"
+                android:text="@string/btn_dubbing"
+                android:background="@drawable/bg_sari_button_secondary"
+                android:textColor="@color/sari_text_primary"
+                android:contentDescription="@string/desc_dubbing" />
+
+            <Button
+                android:textAllCaps="false"
+                android:id="@+id/dubbingExportButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1.05"
+                android:minHeight="46dp"
+                android:layout_marginHorizontal="3dp"
+                android:textSize="10sp"
+                android:text="@string/btn_export_dubbing"
+                android:background="@drawable/bg_sari_button_secondary"
+                android:textColor="@color/sari_text_primary"
+                android:contentDescription="@string/desc_export_dubbing" />
+
+            <Button
+                android:textAllCaps="false"
+                android:id="@+id/operationLogToggleButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.65"
+                android:minHeight="46dp"
+                android:layout_marginHorizontal="3dp"
+                android:textSize="10sp"
+                android:text="@string/btn_history"
+                android:background="@drawable/bg_sari_button_secondary"
+                android:textColor="@color/sari_text_primary"
+                android:contentDescription="@string/btn_history" />
+
+            <Button
+                android:textAllCaps="false"
+                android:id="@+id/rotationButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.7"
+                android:minHeight="46dp"
+                android:layout_marginStart="3dp"
+                android:textSize="19sp"
+                android:text="↻"
+                android:background="@drawable/bg_sari_button_secondary"
+                android:textColor="@color/sari_text_primary"
+                android:contentDescription="@string/desc_rotation" />
+
+            <Button
+                android:textAllCaps="false"
+                android:id="@+id/fullscreenButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.7"
+                android:minHeight="46dp"
+                android:layout_marginStart="3dp"
+                android:textSize="19sp"
+                android:text="⛶"
+                android:background="@drawable/bg_sari_button_secondary"
+                android:textColor="@color/sari_text_primary"
+                android:contentDescription="@string/desc_fullscreen" />
+
+            <Button
+                android:textAllCaps="false"
+                android:id="@+id/savedItemsButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.8"
+                android:minHeight="46dp"
+                android:layout_marginStart="3dp"
+                android:textSize="11sp"
+                android:text="@string/btn_my_files"
+                android:background="@drawable/bg_sari_button_secondary"
+                android:textColor="@color/sari_text_primary"
+                android:contentDescription="@string/desc_my_files" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- أزرار مخفية للاستخدام القديم (مخفية) -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone">
+
+        <Button android:textAllCaps="false" android:id="@+id/toggleOverlayButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/transcribeXAutoButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/testCaptureButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/transcribeAudioButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/transcribeDirectMediaUrlButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/importSrtFromUrlButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/analyzeLinkButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/generateSrtFromLinkButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/pasteLinkTranscribeButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/copyLinkOnlyButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/translateSrtButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/offsetMinusButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/offsetPlusButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/offsetResetButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/checkTimeButton" android:layout_width="1dp" android:layout_height="1dp" />
+        <Button android:textAllCaps="false" android:id="@+id/reloadXButton" android:layout_width="1dp" android:layout_height="1dp" />
+
+    </LinearLayout>
+
+    <!-- Transparent hit areas positioned from Kotlin as percentages of the artwork. -->
+    <FrameLayout
+        android:id="@+id/binRawahHomeTouchLayer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clickable="false">
+
+        <View android:id="@+id/homeStartHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homeHistoryHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homeFilesHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homeSettingsHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homeSettingsTileHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homePremiumHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homePremiumBadgeHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homeLogoHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="false" />
+    </FrameLayout>
+
+</RelativeLayout>
