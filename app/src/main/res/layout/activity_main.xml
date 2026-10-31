@@ -6,9 +6,20 @@
     android:layoutDirection="locale"
     android:fitsSystemWindows="true">
 
+    <!-- Bin Rawah exact visual home artwork. Interactive hit areas are transparent overlays below. -->
+    <ImageView
+        android:id="@+id/binRawahHomeArtwork"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:src="@drawable/binrawah_home"
+        android:scaleType="centerCrop"
+        android:contentDescription="بن رواح - Mohammed" />
+
+
     <!-- WebView كامل (95% من الشاشة) -->
     <WebView
         android:id="@+id/webView"
+        android:visibility="gone"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_above="@id/bottomBar"
@@ -17,6 +28,7 @@
     <!-- SubtitleOverlay فوق WebView -->
     <FrameLayout
         android:id="@+id/webContainer"
+        android:visibility="gone"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_above="@id/bottomBar"
@@ -32,6 +44,7 @@
     <!-- الشريط العلوي (رفيع) -->
     <LinearLayout
         android:id="@+id/topBar"
+        android:visibility="gone"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_alignParentTop="true"
@@ -151,6 +164,7 @@
     <!-- Primary action + compact secondary actions. Existing view IDs remain stable. -->
     <LinearLayout
         android:id="@+id/bottomBar"
+        android:visibility="gone"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
@@ -306,5 +320,19 @@
         <Button android:textAllCaps="false" android:id="@+id/reloadXButton" android:layout_width="1dp" android:layout_height="1dp" />
 
     </LinearLayout>
+
+    <!-- Transparent hit areas positioned from Kotlin as percentages of the artwork. -->
+    <FrameLayout
+        android:id="@+id/binRawahHomeTouchLayer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clickable="true">
+
+        <View android:id="@+id/homeStartHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
+        <View android:id="@+id/homeHistoryHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
+        <View android:id="@+id/homeFilesHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
+        <View android:id="@+id/homeSettingsHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
+        <View android:id="@+id/homeLogoHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="false" />
+    </FrameLayout>
 
 </RelativeLayout>

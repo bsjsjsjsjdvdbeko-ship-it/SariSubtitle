@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Sari Subtitle</string>
+    <string name="app_name">بن رواح</string>
     <string name="hint_url">الصق رابط الفيديو هنا…</string>
     <string name="btn_load">فتح</string>
     <string name="btn_settings">الإعدادات</string>
