@@ -2423,8 +2423,8 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
     }
 
     /**
-     * My Files library: each saved SRT exposes both the original URL and a local-video action.
-     * When offline, opening the normal item prefers the previously bound local video.
+     * My Files: keep the original post link, the currently linked local video,
+     * and the action to replace that local video as three distinct actions.
      */
     private fun showSavedSubtitles() {
         val items = storage.listLibraryItems()
@@ -2460,60 +2460,69 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                 maxLines = 2
             }
             val details = TextView(this).apply {
-                val source = item.sourceUrl?.let { displaySourceLabel(it) }
-                val local = item.localVideoTitle?.let { "فيديو محلي: $it" }
+                val source = item.sourceUrl?.takeIf { it.startsWith("http://", true) || it.startsWith("https://", true) }
+                    ?.let { displaySourceLabel(it) }
+                val local = item.localVideoTitle?.let { "الفيديو المحلي: $it" }
                 text = listOfNotNull(
                     if (item.sourceTitle != null && item.title != item.sourceTitle) "SRT: ${item.title}" else null,
                     "${item.cueCount} مقطع",
-                    source,
-                    local
+                    source ?: if (item.sourceUrl.isNullOrBlank()) "لا يوجد رابط منشور محفوظ" else null,
+                    local ?: "لم يتم ربط فيديو محلي"
                 ).joinToString("  •  ")
                 textSize = 12f
                 setTextColor(android.graphics.Color.rgb(167, 176, 200))
                 maxLines = 3
                 setPadding(0, dp(4), 0, dp(8))
             }
-            val actions = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-                layoutDirection = View.LAYOUT_DIRECTION_LOCALE
-            }
+
+            // Three separate, full-width actions avoid confusing two buttons with the same purpose.
             val openLink = Button(this).apply {
-                text = when {
-                    item.sourceUrl?.startsWith("http", true) == true -> "فتح الرابط"
-                    item.sourceUrl?.startsWith("content:", true) == true || item.sourceUrl?.startsWith("file:", true) == true -> "فتح الفيديو"
-                    else -> "فتح المصدر"
-                }
+                text = "فتح الرابط"
                 isAllCaps = false
-                isEnabled = !item.sourceUrl.isNullOrBlank()
+                isEnabled = item.sourceUrl?.let { it.startsWith("http://", true) || it.startsWith("https://", true) } == true
                 setOnClickListener {
                     val srt = storage.loadLibraryItem(item.id)
                     if (srt.isNullOrBlank()) {
                         Toast.makeText(this@SariSubtitleActivity, "تعذّر فتح ملف الترجمة", Toast.LENGTH_LONG).show()
-                    } else if (item.sourceUrl.isNullOrBlank()) {
-                        Toast.makeText(this@SariSubtitleActivity, "لا يوجد رابط أصلي محفوظ لهذه الترجمة", Toast.LENGTH_LONG).show()
+                    } else if (!isEnabled) {
+                        Toast.makeText(this@SariSubtitleActivity, "لا يوجد رابط منشور محفوظ لهذه الترجمة", Toast.LENGTH_LONG).show()
                     } else {
+                        // Opens the original post in the in-app browser and restores its saved cues.
                         openSavedLibraryItem(item, srt, forceLocal = false)
                     }
                 }
             }
-            actions.addView(openLink, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(4) })
-            val localButton = Button(this).apply {
-                text = if (item.localVideoUri.isNullOrBlank()) "فتح بالفيديو المحلي" else "▶ الفيديو المحلي"
+            val openLocal = Button(this).apply {
+                text = "الفيديو المحلي"
                 isAllCaps = false
+                isEnabled = !item.localVideoUri.isNullOrBlank()
                 setOnClickListener {
                     val srt = storage.loadLibraryItem(item.id)
                     if (srt.isNullOrBlank()) {
                         Toast.makeText(this@SariSubtitleActivity, "تعذّر فتح ملف الترجمة", Toast.LENGTH_LONG).show()
+                    } else if (item.localVideoUri.isNullOrBlank()) {
+                        Toast.makeText(this@SariSubtitleActivity, "لا يوجد فيديو محلي مرتبط. استخدم خيار تغيير الفيديو المحلي لربطه.", Toast.LENGTH_LONG).show()
                     } else {
                         openSavedLibraryItem(item, srt, forceLocal = true)
                     }
                 }
             }
-            actions.addView(localButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(4) })
+            val replaceLocal = Button(this).apply {
+                text = if (item.localVideoUri.isNullOrBlank()) "اختيار فيديو محلي" else "تغيير الفيديو المحلي"
+                isAllCaps = false
+                setOnClickListener {
+                    // Only the local-video association changes; the saved SRT and post URL remain untouched.
+                    pickLocalVideoForLibraryItem(item.id)
+                }
+            }
+
             row.addView(title)
             row.addView(details)
-            row.addView(actions)
+            listOf(openLink, openLocal, replaceLocal).forEach { button ->
+                row.addView(button, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = dp(4)
+                })
+            }
             row.setOnLongClickListener {
                 androidx.appcompat.app.AlertDialog.Builder(this)
                     .setTitle("حذف من ملفاتي؟")
