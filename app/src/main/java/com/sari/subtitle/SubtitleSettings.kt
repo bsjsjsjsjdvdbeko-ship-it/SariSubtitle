@@ -28,6 +28,7 @@ class SubtitleSettings(context: Context) {
         const val STT_DEEPGRAM = "deepgram"
         const val STT_OPENAI = "openai"
         const val STT_LOCAL = "local-vosk"
+        const val STT_OMNIROUTE = "omniroute"
         const val TRANSLATION_AUTO = "auto"
         const val TRANSLATION_GEMINI = "gemini"
         const val TRANSLATION_OMNIROUTE = "omniroute"
@@ -115,6 +116,10 @@ class SubtitleSettings(context: Context) {
         get() = prefs.getString("omniroute_text_model", "auto") ?: "auto"
         set(value) = prefs.edit().putString("omniroute_text_model", value.trim().ifBlank { "auto" }).apply()
 
+    var omniRouteSttModel: String
+        get() = prefs.getString("omniroute_stt_model", "whisper-large-v3-turbo") ?: "whisper-large-v3-turbo"
+        set(value) = prefs.edit().putString("omniroute_stt_model", value.trim().ifBlank { "whisper-large-v3-turbo" }).apply()
+
     var omniRouteEnabled: Boolean
         get() = prefs.getBoolean("omniroute_enabled", false)
         set(value) = prefs.edit().putBoolean("omniroute_enabled", value).apply()
@@ -165,6 +170,7 @@ class SubtitleSettings(context: Context) {
             STT_DEEPGRAM -> STT_DEEPGRAM
             STT_OPENAI -> STT_OPENAI
             STT_LOCAL -> STT_LOCAL
+            STT_OMNIROUTE -> STT_OMNIROUTE
             else -> STT_GROQ
         }).apply()
     val sttProviderLabel: String get() = when (sttProvider) {
@@ -172,6 +178,7 @@ class SubtitleSettings(context: Context) {
         STT_DEEPGRAM -> "Deepgram Nova-3"
         STT_OPENAI -> "OpenAI Whisper"
         STT_LOCAL -> "Vosk محلي دون إنترنت"
+        STT_OMNIROUTE -> "OmniRoute Whisper"
         else -> "Groq Whisper"
     }
 

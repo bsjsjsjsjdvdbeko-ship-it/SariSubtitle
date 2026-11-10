@@ -2,6 +2,7 @@ package com.sari.subtitle
 
 import android.content.Context
 import kotlin.math.max
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Stage 38: one deterministic routing policy for cloud providers.
@@ -32,6 +33,19 @@ object ProviderRoutingEngine {
     private const val OPEN_AFTER_FAILURES = 3
     private const val OPEN_COOLDOWN_MS = 60_000L
     private const val STALE_HEALTH_MS = 30 * 60_000L
+
+    // HALF_OPEN must allow exactly one in-flight probe per provider. Without this
+    // lease, concurrent subtitle chunks could all probe a recovering provider.
+    private val halfOpenProbeLeases = ConcurrentHashMap.newKeySet<String>()
+
+    fun acquireHalfOpenProbe(context: Context, provider: String): Boolean {
+        return if (circuit(context, provider) != CircuitState.HALF_OPEN) true
+        else halfOpenProbeLeases.add(provider)
+    }
+
+    fun releaseHalfOpenProbe(provider: String) {
+        halfOpenProbeLeases.remove(provider)
+    }
 
     fun circuit(context: Context, provider: String): CircuitState {
         val h = ProviderHealthStore.get(context, provider) ?: return CircuitState.CLOSED

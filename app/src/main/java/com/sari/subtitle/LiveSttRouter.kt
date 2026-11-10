@@ -72,12 +72,14 @@ class LiveSttRouter(private val context: Context) {
             SubtitleSettings.STT_DEEPGRAM -> listOf(SubtitleSettings.STT_DEEPGRAM, SubtitleSettings.STT_GROQ)
             SubtitleSettings.STT_GROQ -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
             SubtitleSettings.STT_OPENAI -> listOf(SubtitleSettings.STT_OPENAI)
+            SubtitleSettings.STT_OMNIROUTE -> listOf(SubtitleSettings.STT_OMNIROUTE, SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
             else -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
         }.filter { p ->
             when (p) {
                 SubtitleSettings.STT_GROQ -> settings.groqApiKey.isNotBlank()
                 SubtitleSettings.STT_DEEPGRAM -> settings.deepgramApiKey.isNotBlank()
                 SubtitleSettings.STT_OPENAI -> settings.openAiApiKey.isNotBlank()
+                SubtitleSettings.STT_OMNIROUTE -> settings.omniRouteEnabled && settings.hasOmniRouteApiKey()
                 else -> false
             }
         }
@@ -96,6 +98,7 @@ class LiveSttRouter(private val context: Context) {
                 ProviderConnectionTester.GROQ -> settings.groqApiKey.isNotBlank()
                 ProviderConnectionTester.DEEPGRAM -> settings.deepgramApiKey.isNotBlank()
                 ProviderConnectionTester.OPENAI -> settings.openAiApiKey.isNotBlank()
+                ProviderConnectionTester.OMNIROUTE -> settings.omniRouteEnabled && settings.hasOmniRouteApiKey()
                 else -> false
             } },
             forceProvider = selected.takeIf { it !in setOf(SubtitleSettings.STT_AUTO, SubtitleSettings.STT_LOCAL) }?.let(::healthId),
@@ -118,6 +121,9 @@ class LiveSttRouter(private val context: Context) {
                             .transcribe(uri, config.language)
                             .let { TranscriptionResult(it.language, it.text, it.srt, it.segmentCount) }
                         SubtitleSettings.STT_GROQ -> GroqWhisperService(context) { settings.groqApiKey }
+                            .transcribe(uri, config.language)
+                            .let { TranscriptionResult(it.language, it.text, it.srt, it.segmentCount) }
+                        SubtitleSettings.STT_OMNIROUTE -> OmniRouteWhisperService(context, settings)
                             .transcribe(uri, config.language)
                             .let { TranscriptionResult(it.language, it.text, it.srt, it.segmentCount) }
                         else -> throw IllegalStateException("Provider STT غير مدعوم: $id")
@@ -151,6 +157,7 @@ class LiveSttRouter(private val context: Context) {
     }
 
     private fun provider(id: String): String = when (id) {
+        ProviderConnectionTester.OMNIROUTE -> SubtitleSettings.STT_OMNIROUTE
         ProviderConnectionTester.DEEPGRAM -> SubtitleSettings.STT_DEEPGRAM
         ProviderConnectionTester.OPENAI -> SubtitleSettings.STT_OPENAI
         else -> SubtitleSettings.STT_GROQ

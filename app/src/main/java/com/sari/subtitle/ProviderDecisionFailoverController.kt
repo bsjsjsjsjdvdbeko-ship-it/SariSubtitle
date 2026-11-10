@@ -69,6 +69,12 @@ object ProviderDecisionFailoverController {
         }
 
         candidates.forEachIndexed { index, candidate ->
+            val halfOpen = ProviderRoutingEngine.circuit(context, candidate.provider) ==
+                ProviderRoutingEngine.CircuitState.HALF_OPEN
+            if (halfOpen && !ProviderRoutingEngine.acquireHalfOpenProbe(context, candidate.provider)) {
+                attempts += Attempt(candidate.provider, 0L, null, false, "half_open_probe_already_in_flight")
+                return@forEachIndexed
+            }
             val started = android.os.SystemClock.elapsedRealtime()
             try {
                 val value = operation(candidate.provider)
@@ -121,6 +127,8 @@ object ProviderDecisionFailoverController {
                     reason = "request_failed:${safeReason(e)}"
                 )
                 recordTrace(context, decision, candidate.provider, "failover:request_failed", attempts)
+            } finally {
+                if (halfOpen) ProviderRoutingEngine.releaseHalfOpenProbe(candidate.provider)
             }
         }
 

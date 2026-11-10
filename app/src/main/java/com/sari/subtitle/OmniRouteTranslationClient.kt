@@ -12,8 +12,8 @@ import java.net.URL
 /** Text-only OmniRoute gateway client. It never receives audio or SRT timestamps. */
 class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
     companion object {
-        /** Fixed, user-verified translation model; never fall back to OmniRoute auto routing. */
-        const val FIXED_TRANSLATION_MODEL = "xkiro/qwen/qwen3.5-omni-flash:free"
+        /** Legacy fallback for installations that have no saved model preference. */
+        const val DEFAULT_TRANSLATION_MODEL = "auto"
     }
 
     fun translateBatch(
@@ -39,10 +39,11 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
             Input JSON array:
             $input
         """.trimIndent()
-        // A deliberate model override is used only for explicit Gemini fallback calls.
-        // The primary OmniRoute path is pinned to the user-verified xKiro/Qwen model.
-        val selectedModel = modelOverride?.trim()?.takeIf { it.isNotBlank() && !it.equals("auto", true) }
-            ?: FIXED_TRANSLATION_MODEL
+        // Respect the model selected by the user in Translation Providers.
+        // "auto" is a supported OmniRoute routing target; do not silently pin
+        // requests to a hard-coded model and ignore the saved preference.
+        val selectedModel = modelOverride?.trim()?.takeIf { it.isNotBlank() }
+            ?: settings.omniRouteTextModel.trim().ifBlank { DEFAULT_TRANSLATION_MODEL }
         val payload = JSONObject()
             .put("model", selectedModel)
             .put("messages", JSONArray()
@@ -107,8 +108,16 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
         .firstOrNull { it.contains(providerFragment, ignoreCase = true) }
 
     fun testConnection(): String {
-        val count = availableModelIds().size
-        return "اتصال OmniRoute ناجح. النماذج الظاهرة: $count"
+        val models = availableModelIds()
+        val configuredModel = settings.omniRouteTextModel.trim().ifBlank { DEFAULT_TRANSLATION_MODEL }
+        if (!configuredModel.equals("auto", ignoreCase = true) && models.isNotEmpty() &&
+            configuredModel !in models) {
+            throw IOException(
+                "اتصال OmniRoute ناجح، لكن النموذج المحدد غير موجود في /v1/models: $configuredModel. " +
+                    "اختر auto أو معرّفاً ظاهراً في قائمة النماذج."
+            )
+        }
+        return "اتصال OmniRoute ناجح. النماذج الظاهرة: ${models.size}. النموذج المحدد: $configuredModel"
     }
 
     private fun requestJson(path: String, payload: String?, connectTimeoutMs: Int, readTimeoutMs: Int): JSONObject {

@@ -76,6 +76,7 @@ class SariSubtitleActivity : AppCompatActivity() {
         private const val REQ_TRANSLATE_SRT_PICK = 1009
         private const val REQ_SAVE_TRANSLATED_SRT = 1003
         private const val REQ_PICK_LOCAL_VIDEO_FOR_SRT = 1010
+        private const val REQ_SAVE_LIBRARY_SRT = 1011
         private const val OFFSET_STEP_MS = 500L
         private const val PREF_LAST_CACHED_VIDEO_URL = "last_cached_video_url"
         private const val RESUME_MIN_MS = 5_000L
@@ -131,6 +132,8 @@ class SariSubtitleActivity : AppCompatActivity() {
     /** URL requested by the one-tap workflow; capture begins after WebView loads it. */
     private var pendingAutoCaptureUrl: String? = null
     private var pendingLocalVideoLibraryId: String? = null
+    private var pendingLibrarySrtText: String? = null
+    private var pendingLibrarySrtFileName: String = "translated.srt"
 
     private var activePlaybackKey: String? = null
     private var pendingResumePositionMs = 0L
@@ -1048,13 +1051,14 @@ class SariSubtitleActivity : AppCompatActivity() {
                     lastSrtUrl = videoUrl
                     pendingWhisperSrt = translated
                     val cacheSaved = saveCachedSrt(videoUrl, translated, cues.size)
-                    val librarySaved = storage.saveLibraryItem(
+                    val savedLibraryId = storage.saveLibraryItem(
                         "ar_${fileName.removeSuffix(".srt")}.srt", translated, cues.size, videoUrl,
                         sourceTitle = sourceTitle ?: currentVideoTitle(),
                         localVideoUri = localVideoUri,
                         localVideoTitle = localVideoUri?.let { queryDisplayName(Uri.parse(it)) },
                         preserveVersion = true
-                    ) != null
+                    )
+                    val librarySaved = savedLibraryId != null
                     overlayOn = true
                     statusText.visibility = android.view.View.VISIBLE
                     statusText.text = when {
@@ -1064,6 +1068,9 @@ class SariSubtitleActivity : AppCompatActivity() {
                     }
                     pollCurrentTimeOnce()
                     Toast.makeText(this, if (cacheSaved || librarySaved) "اكتملت الترجمة وحُفظت داخل التطبيق" else "اكتملت الترجمة لكن تعذّر حفظ الملف", Toast.LENGTH_LONG).show()
+                    if (localVideoUri != null) {
+                        offerTranslatedLocalSrtDownload(translated, "ar_${fileName.removeSuffix(".srt")}.srt")
+                    }
                 }
             } catch (e: Exception) {
                 recordOperation("ترجمة SRT تلقائية", "SrtTranslationService", translationRouteLabel(), translationStarted,
@@ -2515,10 +2522,15 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                     pickLocalVideoForLibraryItem(item.id)
                 }
             }
+            val downloadSrt = Button(this).apply {
+                text = "تنزيل ملف SRT المترجم"
+                isAllCaps = false
+                setOnClickListener { beginLibrarySrtDownload(item.id) }
+            }
 
             row.addView(title)
             row.addView(details)
-            listOf(openLink, openLocal, replaceLocal).forEach { button ->
+            listOf(openLink, openLocal, replaceLocal, downloadSrt).forEach { button ->
                 row.addView(button, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     topMargin = dp(4)
                 })
@@ -2544,6 +2556,63 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
             .setTitle("ملفاتي (${items.size})")
             .setView(scroll)
             .setNegativeButton("إغلاق", null)
+            .show()
+    }
+
+    /** Export a saved library SRT through Android's document picker (no broad storage permission). */
+    private fun beginLibrarySrtDownload(libraryId: String) {
+        val item = storage.libraryItem(libraryId)
+        val srt = storage.loadLibraryItem(libraryId)
+        if (item == null || srt.isNullOrBlank()) {
+            Toast.makeText(this, "تعذّر العثور على ملف SRT المحفوظ", Toast.LENGTH_LONG).show()
+            return
+        }
+        pendingLibrarySrtText = srt
+        pendingLibrarySrtFileName = item.title.substringAfterLast('/').ifBlank { "translated.srt" }
+        if (!pendingLibrarySrtFileName.endsWith(".srt", true)) pendingLibrarySrtFileName += ".srt"
+        launchLibrarySrtDocumentPicker()
+    }
+
+    private fun launchLibrarySrtDocumentPicker() {
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/x-subrip"
+            putExtra(Intent.EXTRA_TITLE, pendingLibrarySrtFileName)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        }
+        try {
+            startActivityForResult(intent, REQ_SAVE_LIBRARY_SRT)
+        } catch (e: Exception) {
+            pendingLibrarySrtText = null
+            Toast.makeText(this, "تعذّر فتح نافذة حفظ SRT: ${e.message ?: "خطأ غير معروف"}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun saveLibrarySrtExport(uri: Uri) {
+        val srt = pendingLibrarySrtText
+        pendingLibrarySrtText = null
+        if (srt.isNullOrBlank()) {
+            Toast.makeText(this, "لا يوجد محتوى SRT جاهز للتنزيل", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            contentResolver.openOutputStream(uri, "w")?.bufferedWriter(Charsets.UTF_8)?.use { it.write(srt) }
+                ?: throw IllegalStateException("تعذّر فتح الملف المحدد للكتابة")
+            Toast.makeText(this, "تم تنزيل ملف SRT المترجم بنجاح", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "فشل تنزيل SRT: ${e.message ?: "خطأ غير معروف"}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun offerTranslatedLocalSrtDownload(srt: String, suggestedName: String) {
+        pendingLibrarySrtText = srt
+        pendingLibrarySrtFileName = suggestedName.substringAfterLast('/').ifBlank { "translated_ar.srt" }
+        if (!pendingLibrarySrtFileName.endsWith(".srt", true)) pendingLibrarySrtFileName += ".srt"
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("اكتملت ترجمة الملف المحلي")
+            .setMessage("تم إنشاء ملف SRT العربي وحفظه داخل «ملفاتي». هل تريد تنزيل نسخة SRT إلى مجلد تختاره على هاتفك؟")
+            .setNegativeButton("لاحقًا") { _, _ -> pendingLibrarySrtText = null }
+            .setPositiveButton("تنزيل SRT") { _, _ -> launchLibrarySrtDocumentPicker() }
             .show()
     }
 
@@ -3059,7 +3128,10 @@ private fun openAudioPicker() {
             }
             return
         }
-        if (resultCode != Activity.RESULT_OK) return
+        if (resultCode != Activity.RESULT_OK) {
+            if (requestCode == REQ_SAVE_LIBRARY_SRT) pendingLibrarySrtText = null
+            return
+        }
         if (requestCode == REQ_SUBWHISPER_INTERNAL) {
             var srtText = data?.getStringExtra(SubWhisperInternalActivity.EXTRA_SRT_TEXT)
             // إذا لم يصل، اقرأ من SrtStorage (احتياطي)
@@ -3091,6 +3163,11 @@ private fun openAudioPicker() {
             } catch (e: Exception) {
                 Toast.makeText(this, "تعذّر قراءة SRT: ${e.message}", Toast.LENGTH_LONG).show()
             }
+            return
+        }
+        if (requestCode == REQ_SAVE_LIBRARY_SRT) {
+            val exportUri = data?.data
+            if (exportUri != null) saveLibrarySrtExport(exportUri) else pendingLibrarySrtText = null
             return
         }
         val uri = data?.data ?: return
