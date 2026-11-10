@@ -55,6 +55,7 @@ import androidx.webkit.WebViewFeature
 import org.json.JSONObject
 import java.io.IOException
 import java.io.File
+import kotlin.math.roundToInt
 
 /**
  * Sari Subtitle — المرحلة 3.3
@@ -75,6 +76,7 @@ class SariSubtitleActivity : AppCompatActivity() {
         private const val REQ_TRANSLATE_SRT_PICK = 1009
         private const val REQ_SAVE_TRANSLATED_SRT = 1003
         private const val REQ_PICK_LOCAL_VIDEO_FOR_SRT = 1010
+        private const val REQ_SAVE_LIBRARY_SRT = 1011
         private const val OFFSET_STEP_MS = 500L
         private const val PREF_LAST_CACHED_VIDEO_URL = "last_cached_video_url"
         private const val RESUME_MIN_MS = 5_000L
@@ -130,6 +132,8 @@ class SariSubtitleActivity : AppCompatActivity() {
     /** URL requested by the one-tap workflow; capture begins after WebView loads it. */
     private var pendingAutoCaptureUrl: String? = null
     private var pendingLocalVideoLibraryId: String? = null
+    private var pendingLibrarySrtText: String? = null
+    private var pendingLibrarySrtFileName: String = "translated.srt"
 
     private var activePlaybackKey: String? = null
     private var pendingResumePositionMs = 0L
@@ -157,6 +161,109 @@ class SariSubtitleActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // Bin Rawah visual home: the artwork remains unchanged.
+        // Interactive views are positioned from the ImageView's actual CENTER_CROP matrix,
+        // not from raw screen percentages. This keeps every touch target locked to the
+        // artwork on different phone aspect ratios.
+        val homeArtwork = findViewById<android.widget.ImageView>(R.id.binRawahHomeArtwork)
+        val homeTouchLayer = findViewById<android.view.View>(R.id.binRawahHomeTouchLayer)
+
+        fun enterFunctionalSurface() {
+            homeTouchLayer?.visibility = android.view.View.GONE
+            homeArtwork?.visibility = android.view.View.GONE
+            findViewById<android.view.View>(R.id.webView)?.visibility = android.view.View.VISIBLE
+            findViewById<android.view.View>(R.id.webContainer)?.visibility = android.view.View.VISIBLE
+            findViewById<android.view.View>(R.id.topBar)?.visibility = android.view.View.VISIBLE
+            findViewById<android.view.View>(R.id.bottomBar)?.visibility = android.view.View.VISIBLE
+        }
+
+        fun openSettingsCenter() {
+            startActivity(Intent(this@SariSubtitleActivity, SettingsCenterActivity::class.java))
+        }
+
+        // One touch router for the artwork. This avoids overlapping transparent child
+        // views and ensures each screen location can trigger exactly one destination.
+        val homeRegions = linkedMapOf(
+            1 to android.graphics.RectF(0.100f, 0.645f, 0.900f, 0.750f), // main CTA
+            2 to android.graphics.RectF(0.000f, 0.755f, 0.250f, 0.890f), // history
+            3 to android.graphics.RectF(0.250f, 0.755f, 0.500f, 0.890f), // files
+            4 to android.graphics.RectF(0.500f, 0.755f, 0.750f, 0.890f), // settings tile
+            5 to android.graphics.RectF(0.750f, 0.755f, 1.000f, 0.890f), // premium tile
+            6 to android.graphics.RectF(0.020f, 0.045f, 0.210f, 0.135f), // premium badge
+            7 to android.graphics.RectF(0.780f, 0.045f, 0.890f, 0.135f)  // settings gear
+        )
+
+        fun hitRegionAt(layerX: Float, layerY: Float): Int? {
+            val artwork = homeArtwork ?: return null
+            val layer = homeTouchLayer ?: return null
+            val drawable = artwork.drawable ?: return null
+            if (drawable.intrinsicWidth <= 0 || drawable.intrinsicHeight <= 0) return null
+
+            val inverse = android.graphics.Matrix()
+            if (!artwork.imageMatrix.invert(inverse)) return null
+
+            // Convert touch-layer coordinates into the ImageView's drawable coordinates.
+            val point = floatArrayOf(
+                layerX + layer.left - artwork.left - artwork.paddingLeft,
+                layerY + layer.top - artwork.top - artwork.paddingTop
+            )
+            inverse.mapPoints(point)
+            val nx = point[0] / drawable.intrinsicWidth.toFloat()
+            val ny = point[1] / drawable.intrinsicHeight.toFloat()
+            return homeRegions.entries.firstOrNull { it.value.contains(nx, ny) }?.key
+        }
+
+        fun dispatchHomeAction(action: Int) {
+            when (action) {
+                1 -> {
+                    enterFunctionalSurface()
+                    findViewById<Button>(R.id.menuButton)?.performClick()
+                }
+                2 -> startActivity(Intent(this@SariSubtitleActivity, OperationHistoryActivity::class.java))
+                3 -> showSavedSubtitles()
+                4, 7 -> openSettingsCenter()
+                5, 6 -> startActivity(Intent(this@SariSubtitleActivity, PremiumCenterActivity::class.java))
+            }
+        }
+
+        var pressedHomeAction: Int? = null
+        homeTouchLayer?.apply {
+            // The individual legacy hit views are deliberately disabled. Only this
+            // router receives touches, so two transparent views cannot compete.
+            for (id in intArrayOf(
+                R.id.homeStartHit, R.id.homeHistoryHit, R.id.homeFilesHit,
+                R.id.homeSettingsHit, R.id.homeSettingsTileHit,
+                R.id.homePremiumHit, R.id.homePremiumBadgeHit
+            )) {
+                findViewById<android.view.View>(id)?.apply {
+                    isClickable = false
+                    isFocusable = false
+                }
+            }
+            isClickable = true
+            setOnTouchListener { _, event ->
+                when (event.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        pressedHomeAction = hitRegionAt(event.x, event.y)
+                        pressedHomeAction != null
+                    }
+                    android.view.MotionEvent.ACTION_UP -> {
+                        val releasedAction = hitRegionAt(event.x, event.y)
+                        val shouldDispatch = pressedHomeAction != null && pressedHomeAction == releasedAction
+                        pressedHomeAction = null
+                        if (shouldDispatch) dispatchHomeAction(releasedAction!!)
+                        shouldDispatch
+                    }
+                    android.view.MotionEvent.ACTION_CANCEL -> {
+                        pressedHomeAction = null
+                        true
+                    }
+                    else -> pressedHomeAction != null
+                }
+            }
+            bringToFront()
+        }
 
         settings = SubtitleSettings(this)
         applyPreferredOrientation()
@@ -284,6 +391,7 @@ class SariSubtitleActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.loadButton).setOnClickListener {
+            enterFunctionalSurface()
             val typed = urlInput.text.toString().trim()
             if (typed.isNotEmpty()) {
                 webView.loadUrl(typed)
@@ -373,6 +481,7 @@ class SariSubtitleActivity : AppCompatActivity() {
         // المحرك الداخلي يترجم SRT داخل التطبيق ولا يفتح SubWhisper تلقائياً.
         findViewById<Button>(R.id.menuButton).apply {
             setOnClickListener {
+                enterFunctionalSurface()
                 startPrimaryTranslationFlow()
             }
             setOnLongClickListener {
@@ -448,6 +557,13 @@ class SariSubtitleActivity : AppCompatActivity() {
         }
 
         startPolling()
+        val openSavedItems = intent.getBooleanExtra("open_saved_items", false)
+        if (openSavedItems) {
+            // Navigation helper from the new Settings Center. It only opens the existing
+            // saved-items screen; it does not alter any translation/video state.
+            window.decorView.post { showSavedSubtitles() }
+        }
+
         val sharedUrl = extractSharedUrl(intent)
         if (sharedUrl != null) {
             urlInput.setText(sharedUrl)
@@ -935,13 +1051,14 @@ class SariSubtitleActivity : AppCompatActivity() {
                     lastSrtUrl = videoUrl
                     pendingWhisperSrt = translated
                     val cacheSaved = saveCachedSrt(videoUrl, translated, cues.size)
-                    val librarySaved = storage.saveLibraryItem(
+                    val savedLibraryId = storage.saveLibraryItem(
                         "ar_${fileName.removeSuffix(".srt")}.srt", translated, cues.size, videoUrl,
                         sourceTitle = sourceTitle ?: currentVideoTitle(),
                         localVideoUri = localVideoUri,
                         localVideoTitle = localVideoUri?.let { queryDisplayName(Uri.parse(it)) },
                         preserveVersion = true
-                    ) != null
+                    )
+                    val librarySaved = savedLibraryId != null
                     overlayOn = true
                     statusText.visibility = android.view.View.VISIBLE
                     statusText.text = when {
@@ -951,6 +1068,9 @@ class SariSubtitleActivity : AppCompatActivity() {
                     }
                     pollCurrentTimeOnce()
                     Toast.makeText(this, if (cacheSaved || librarySaved) "اكتملت الترجمة وحُفظت داخل التطبيق" else "اكتملت الترجمة لكن تعذّر حفظ الملف", Toast.LENGTH_LONG).show()
+                    if (localVideoUri != null) {
+                        offerTranslatedLocalSrtDownload(translated, "ar_${fileName.removeSuffix(".srt")}.srt")
+                    }
                 }
             } catch (e: Exception) {
                 recordOperation("ترجمة SRT تلقائية", "SrtTranslationService", translationRouteLabel(), translationStarted,
@@ -2310,8 +2430,8 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
     }
 
     /**
-     * My Files library: each saved SRT exposes both the original URL and a local-video action.
-     * When offline, opening the normal item prefers the previously bound local video.
+     * My Files: keep the original post link, the currently linked local video,
+     * and the action to replace that local video as three distinct actions.
      */
     private fun showSavedSubtitles() {
         val items = storage.listLibraryItems()
@@ -2347,60 +2467,74 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                 maxLines = 2
             }
             val details = TextView(this).apply {
-                val source = item.sourceUrl?.let { displaySourceLabel(it) }
-                val local = item.localVideoTitle?.let { "فيديو محلي: $it" }
+                val source = item.sourceUrl?.takeIf { it.startsWith("http://", true) || it.startsWith("https://", true) }
+                    ?.let { displaySourceLabel(it) }
+                val local = item.localVideoTitle?.let { "الفيديو المحلي: $it" }
                 text = listOfNotNull(
                     if (item.sourceTitle != null && item.title != item.sourceTitle) "SRT: ${item.title}" else null,
                     "${item.cueCount} مقطع",
-                    source,
-                    local
+                    source ?: if (item.sourceUrl.isNullOrBlank()) "لا يوجد رابط منشور محفوظ" else null,
+                    local ?: "لم يتم ربط فيديو محلي"
                 ).joinToString("  •  ")
                 textSize = 12f
                 setTextColor(android.graphics.Color.rgb(167, 176, 200))
                 maxLines = 3
                 setPadding(0, dp(4), 0, dp(8))
             }
-            val actions = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-                layoutDirection = View.LAYOUT_DIRECTION_LOCALE
-            }
+
+            // Three separate, full-width actions avoid confusing two buttons with the same purpose.
             val openLink = Button(this).apply {
-                text = when {
-                    item.sourceUrl?.startsWith("http", true) == true -> "فتح الرابط"
-                    item.sourceUrl?.startsWith("content:", true) == true || item.sourceUrl?.startsWith("file:", true) == true -> "فتح الفيديو"
-                    else -> "فتح المصدر"
-                }
+                text = "فتح الرابط"
                 isAllCaps = false
-                isEnabled = !item.sourceUrl.isNullOrBlank()
+                isEnabled = item.sourceUrl?.let { it.startsWith("http://", true) || it.startsWith("https://", true) } == true
                 setOnClickListener {
                     val srt = storage.loadLibraryItem(item.id)
                     if (srt.isNullOrBlank()) {
                         Toast.makeText(this@SariSubtitleActivity, "تعذّر فتح ملف الترجمة", Toast.LENGTH_LONG).show()
-                    } else if (item.sourceUrl.isNullOrBlank()) {
-                        Toast.makeText(this@SariSubtitleActivity, "لا يوجد رابط أصلي محفوظ لهذه الترجمة", Toast.LENGTH_LONG).show()
+                    } else if (!isEnabled) {
+                        Toast.makeText(this@SariSubtitleActivity, "لا يوجد رابط منشور محفوظ لهذه الترجمة", Toast.LENGTH_LONG).show()
                     } else {
+                        // Opens the original post in the in-app browser and restores its saved cues.
                         openSavedLibraryItem(item, srt, forceLocal = false)
                     }
                 }
             }
-            actions.addView(openLink, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(4) })
-            val localButton = Button(this).apply {
-                text = if (item.localVideoUri.isNullOrBlank()) "فتح بالفيديو المحلي" else "▶ الفيديو المحلي"
+            val openLocal = Button(this).apply {
+                text = "الفيديو المحلي"
                 isAllCaps = false
+                isEnabled = !item.localVideoUri.isNullOrBlank()
                 setOnClickListener {
                     val srt = storage.loadLibraryItem(item.id)
                     if (srt.isNullOrBlank()) {
                         Toast.makeText(this@SariSubtitleActivity, "تعذّر فتح ملف الترجمة", Toast.LENGTH_LONG).show()
+                    } else if (item.localVideoUri.isNullOrBlank()) {
+                        Toast.makeText(this@SariSubtitleActivity, "لا يوجد فيديو محلي مرتبط. استخدم خيار تغيير الفيديو المحلي لربطه.", Toast.LENGTH_LONG).show()
                     } else {
                         openSavedLibraryItem(item, srt, forceLocal = true)
                     }
                 }
             }
-            actions.addView(localButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(4) })
+            val replaceLocal = Button(this).apply {
+                text = if (item.localVideoUri.isNullOrBlank()) "اختيار فيديو محلي" else "تغيير الفيديو المحلي"
+                isAllCaps = false
+                setOnClickListener {
+                    // Only the local-video association changes; the saved SRT and post URL remain untouched.
+                    pickLocalVideoForLibraryItem(item.id)
+                }
+            }
+            val downloadSrt = Button(this).apply {
+                text = "تنزيل ملف SRT المترجم"
+                isAllCaps = false
+                setOnClickListener { beginLibrarySrtDownload(item.id) }
+            }
+
             row.addView(title)
             row.addView(details)
-            row.addView(actions)
+            listOf(openLink, openLocal, replaceLocal, downloadSrt).forEach { button ->
+                row.addView(button, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = dp(4)
+                })
+            }
             row.setOnLongClickListener {
                 androidx.appcompat.app.AlertDialog.Builder(this)
                     .setTitle("حذف من ملفاتي؟")
@@ -2422,6 +2556,63 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
             .setTitle("ملفاتي (${items.size})")
             .setView(scroll)
             .setNegativeButton("إغلاق", null)
+            .show()
+    }
+
+    /** Export a saved library SRT through Android's document picker (no broad storage permission). */
+    private fun beginLibrarySrtDownload(libraryId: String) {
+        val item = storage.libraryItem(libraryId)
+        val srt = storage.loadLibraryItem(libraryId)
+        if (item == null || srt.isNullOrBlank()) {
+            Toast.makeText(this, "تعذّر العثور على ملف SRT المحفوظ", Toast.LENGTH_LONG).show()
+            return
+        }
+        pendingLibrarySrtText = srt
+        pendingLibrarySrtFileName = item.title.substringAfterLast('/').ifBlank { "translated.srt" }
+        if (!pendingLibrarySrtFileName.endsWith(".srt", true)) pendingLibrarySrtFileName += ".srt"
+        launchLibrarySrtDocumentPicker()
+    }
+
+    private fun launchLibrarySrtDocumentPicker() {
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/x-subrip"
+            putExtra(Intent.EXTRA_TITLE, pendingLibrarySrtFileName)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        }
+        try {
+            startActivityForResult(intent, REQ_SAVE_LIBRARY_SRT)
+        } catch (e: Exception) {
+            pendingLibrarySrtText = null
+            Toast.makeText(this, "تعذّر فتح نافذة حفظ SRT: ${e.message ?: "خطأ غير معروف"}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun saveLibrarySrtExport(uri: Uri) {
+        val srt = pendingLibrarySrtText
+        pendingLibrarySrtText = null
+        if (srt.isNullOrBlank()) {
+            Toast.makeText(this, "لا يوجد محتوى SRT جاهز للتنزيل", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            contentResolver.openOutputStream(uri, "w")?.bufferedWriter(Charsets.UTF_8)?.use { it.write(srt) }
+                ?: throw IllegalStateException("تعذّر فتح الملف المحدد للكتابة")
+            Toast.makeText(this, "تم تنزيل ملف SRT المترجم بنجاح", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "فشل تنزيل SRT: ${e.message ?: "خطأ غير معروف"}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun offerTranslatedLocalSrtDownload(srt: String, suggestedName: String) {
+        pendingLibrarySrtText = srt
+        pendingLibrarySrtFileName = suggestedName.substringAfterLast('/').ifBlank { "translated_ar.srt" }
+        if (!pendingLibrarySrtFileName.endsWith(".srt", true)) pendingLibrarySrtFileName += ".srt"
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("اكتملت ترجمة الملف المحلي")
+            .setMessage("تم إنشاء ملف SRT العربي وحفظه داخل «ملفاتي». هل تريد تنزيل نسخة SRT إلى مجلد تختاره على هاتفك؟")
+            .setNegativeButton("لاحقًا") { _, _ -> pendingLibrarySrtText = null }
+            .setPositiveButton("تنزيل SRT") { _, _ -> launchLibrarySrtDocumentPicker() }
             .show()
     }
 
@@ -2937,7 +3128,10 @@ private fun openAudioPicker() {
             }
             return
         }
-        if (resultCode != Activity.RESULT_OK) return
+        if (resultCode != Activity.RESULT_OK) {
+            if (requestCode == REQ_SAVE_LIBRARY_SRT) pendingLibrarySrtText = null
+            return
+        }
         if (requestCode == REQ_SUBWHISPER_INTERNAL) {
             var srtText = data?.getStringExtra(SubWhisperInternalActivity.EXTRA_SRT_TEXT)
             // إذا لم يصل، اقرأ من SrtStorage (احتياطي)
@@ -2969,6 +3163,11 @@ private fun openAudioPicker() {
             } catch (e: Exception) {
                 Toast.makeText(this, "تعذّر قراءة SRT: ${e.message}", Toast.LENGTH_LONG).show()
             }
+            return
+        }
+        if (requestCode == REQ_SAVE_LIBRARY_SRT) {
+            val exportUri = data?.data
+            if (exportUri != null) saveLibrarySrtExport(exportUri) else pendingLibrarySrtText = null
             return
         }
         val uri = data?.data ?: return

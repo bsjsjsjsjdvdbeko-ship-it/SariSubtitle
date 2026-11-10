@@ -33,7 +33,7 @@ class OperationHistoryActivity : AppCompatActivity() {
             layoutDirection = if (english) android.view.View.LAYOUT_DIRECTION_LTR else android.view.View.LAYOUT_DIRECTION_RTL
         }
         root.addView(TextView(this).apply {
-            this.text = if (english) "Operation history" else "سجل العمليات"
+            this.text = if (english) "Translation & operation history" else "سجل الترجمة والعمليات"
             textSize = 24f; setTextColor(text); setTypeface(null, android.graphics.Typeface.BOLD)
         })
         countView = TextView(this).apply { textSize = 13f; setTextColor(muted); setPadding(0, 6, 0, 14) }

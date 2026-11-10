@@ -326,12 +326,15 @@
         android:id="@+id/binRawahHomeTouchLayer"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:clickable="true">
+        android:clickable="false">
 
-        <View android:id="@+id/homeStartHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
-        <View android:id="@+id/homeHistoryHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
-        <View android:id="@+id/homeFilesHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
-        <View android:id="@+id/homeSettingsHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" />
+        <View android:id="@+id/homeStartHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homeHistoryHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homeFilesHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homeSettingsHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homeSettingsTileHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homePremiumHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
+        <View android:id="@+id/homePremiumBadgeHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="true" android:focusable="true" android:background="@android:color/transparent" android:elevation="8dp" />
         <View android:id="@+id/homeLogoHit" android:layout_width="1dp" android:layout_height="1dp" android:clickable="false" />
     </FrameLayout>
 

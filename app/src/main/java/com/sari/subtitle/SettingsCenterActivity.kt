@@ -2,6 +2,7 @@ package com.sari.subtitle
 
 import com.sari.subtitle.v2.R
 import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -34,6 +35,11 @@ import kotlin.math.roundToInt
  */
 class SettingsCenterActivity : AppCompatActivity() {
 
+    companion object {
+        const val EXTRA_PREMIUM_FOCUS = "premium_focus"
+    }
+
+    private var premiumFocus = false
     private lateinit var settings: SubtitleSettings
     private lateinit var rootContent: LinearLayout
     private lateinit var appearancePreview: TextView
@@ -43,6 +49,7 @@ class SettingsCenterActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        premiumFocus = intent.getBooleanExtra(EXTRA_PREMIUM_FOCUS, false)
         settings = SubtitleSettings(applicationContext)
         buildUi()
     }
@@ -122,7 +129,9 @@ class SettingsCenterActivity : AppCompatActivity() {
     private fun refreshUi() {
         rootContent.removeAllViews()
 
+        if (premiumFocus) addPremiumFocus()
         addHero()
+        addQuickHub()
         addSectionHeader("الوضع الحالي", "نظرة سريعة على المحرك والمزوّد والمظهر")
         addStatusRow(
             "الترجمة",
@@ -170,6 +179,73 @@ class SettingsCenterActivity : AppCompatActivity() {
         addActionCard("حول التطبيق", "الإصدار والبناء والحزمة الحالية", "عرض معلومات الإصدار") {
             showAbout()
         }
+    }
+
+    private fun addPremiumFocus() {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(
+                Color.rgb(25, 40, 82), Color.rgb(82, 37, 132), Color.rgb(17, 24, 42)
+            )).apply {
+                cornerRadius = dp(22).toFloat()
+                setStroke(dp(1), Color.rgb(170, 120, 255))
+            }
+        }
+        card.addView(TextView(this).apply {
+            text = "♛  النسخة المميزة — بن رواح"
+            textSize = 20f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        card.addView(TextView(this).apply {
+            text = "مركز واحد للتحكم في كل ما هو موجود فعليًا في تطبيقك — بدون استبدال أو حذف الإعدادات السابقة."
+            textSize = 12f
+            setTextColor(Color.rgb(225, 220, 245))
+            setPadding(0, dp(6), 0, dp(10))
+        })
+        addButtonRow(card, "فتح إعدادات الترجمة المتقدمة", "نفس SubtitleSettings الحالية مع حفظ فوري") {
+            openLegacySettings()
+        }
+        addCardToContent(card, 0)
+    }
+
+    private fun addQuickHub() {
+        addSectionHeader("الوصول السريع", "كل زر يفتح الوظيفة الموجودة أصلًا في المشروع")
+        val card = cardBase()
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        fun quickButton(title: String, icon: String, action: () -> Unit): Button = Button(this).apply {
+            text = "$icon\n$title"
+            setAllCaps(false)
+            textSize = 11f
+            setTextColor(Color.WHITE)
+            background = rounded(Color.rgb(30, 43, 72), 14f, Color.rgb(72, 86, 125))
+            minHeight = dp(64)
+            setOnClickListener { action() }
+            layoutParams = LinearLayout.LayoutParams(0, dp(72), 1f).apply {
+                setMargins(dp(3), 0, dp(3), 0)
+            }
+        }
+        row.addView(quickButton("السجل", "◷") {
+            startActivity(Intent(this, OperationHistoryActivity::class.java))
+        })
+        row.addView(quickButton("ملفاتي", "▣") {
+            finish()
+            startActivity(Intent(this, SariSubtitleActivity::class.java).apply {
+                putExtra("open_saved_items", true)
+            })
+        })
+        row.addView(quickButton("المزوّدون", "☁") {
+            startActivity(Intent(this, ProviderCenterActivity::class.java))
+        })
+        row.addView(quickButton("حول", "ⓘ") {
+            showAbout()
+        })
+        card.addView(row)
+        rootContent.addView(card)
     }
 
     private fun addHero() {
