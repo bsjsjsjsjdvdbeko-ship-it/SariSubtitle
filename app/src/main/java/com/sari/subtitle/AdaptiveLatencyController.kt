@@ -25,6 +25,10 @@ class AdaptiveLatencyController(
     private var ewmaE2eMs: Double? = null
     private var lastE2eMs: Long? = null
     private var recommendedChunkMs = 2_000L
+    private var ewmaSttProcessingMs: Double? = null
+    private var ewmaAudioDurationMs: Double? = null
+    private var sttSamples = 0
+    private var queuePressureEvents = 0
     private var lastRecommendationReason = "baseline"
 
     @Synchronized
@@ -33,6 +37,10 @@ class AdaptiveLatencyController(
         ewmaE2eMs = null
         lastE2eMs = null
         recommendedChunkMs = 2_000L
+        ewmaSttProcessingMs = null
+        ewmaAudioDurationMs = null
+        sttSamples = 0
+        queuePressureEvents = 0
         lastRecommendationReason = "baseline"
     }
 
@@ -43,6 +51,32 @@ class AdaptiveLatencyController(
         ewmaE2eMs = ewmaE2eMs?.let { it * 0.7 + sample * 0.3 } ?: sample.toDouble()
         samples++
         updateRecommendation()
+    }
+
+    /** Record measured STT wall time against the amount of audio processed. */
+    @Synchronized
+    fun recordSttProcessing(processingMs: Long, audioDurationMs: Long) {
+        if (processingMs <= 0L || audioDurationMs <= 0L) return
+        val processing = processingMs.coerceAtMost(180_000L).toDouble()
+        val audio = audioDurationMs.coerceIn(250L, 30_000L).toDouble()
+        ewmaSttProcessingMs = ewmaSttProcessingMs?.let { it * 0.75 + processing * 0.25 } ?: processing
+        ewmaAudioDurationMs = ewmaAudioDurationMs?.let { it * 0.75 + audio * 0.25 } ?: audio
+        sttSamples++
+        updateSttRecommendation()
+    }
+
+    /** Queue overflow is a measured backpressure signal; use larger chunks to reduce request overhead. */
+    @Synchronized
+    fun recordQueuePressure() {
+        queuePressureEvents++
+        if (queuePressureEvents >= 2) {
+            val next = (recommendedChunkMs + 200L).coerceAtMost(maxChunkMs)
+            if (next != recommendedChunkMs) {
+                recommendedChunkMs = next
+                lastRecommendationReason = "queue_pressure"
+            }
+            queuePressureEvents = 0
+        }
     }
 
     @Synchronized
@@ -56,6 +90,27 @@ class AdaptiveLatencyController(
 
     @Synchronized
     fun recommendedChunkDurationMs(): Long = recommendedChunkMs
+
+    private fun updateSttRecommendation() {
+        val processing = ewmaSttProcessingMs ?: return
+        val audio = ewmaAudioDurationMs ?: return
+        // If transcription consistently takes longer than the audio chunk, reduce
+        // request frequency with a slightly larger chunk. If it is comfortably fast,
+        // shorten chunks to improve subtitle responsiveness.
+        val ratio = processing / audio
+        val previous = recommendedChunkMs
+        val next = when {
+            ratio > 1.35 -> recommendedChunkMs + 200L
+            ratio < 0.55 -> recommendedChunkMs - 200L
+            else -> recommendedChunkMs
+        }.coerceIn(minChunkMs, maxChunkMs)
+        if (next != previous) {
+            recommendedChunkMs = next
+            lastRecommendationReason = if (next > previous) "stt_throughput_low" else "stt_fast"
+        } else {
+            lastRecommendationReason = "stt_stable"
+        }
+    }
 
     private fun updateRecommendation() {
         val ewma = ewmaE2eMs ?: return

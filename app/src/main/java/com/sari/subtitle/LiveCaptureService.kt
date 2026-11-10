@@ -97,6 +97,7 @@ class LiveCaptureService : Service() {
     )
     private val queue = ArrayBlockingQueue<Work>(QUEUE_CAPACITY)
     private val chunker = AudioChunker(SAMPLE_RATE, CHANNELS, CHUNK_MS, OVERLAP_MS)
+    @Volatile private var activeChunkDurationMs = CHUNK_MS
     private lateinit var router: LiveSttRouter
     private lateinit var translationRouter: LiveTranslationRouter
     private val deduplicator = LiveCueDeduplicator()
@@ -193,6 +194,8 @@ class LiveCaptureService : Service() {
         translationContext.beginSession(sessionId)
         subtitleTimeline.beginSession(sessionId)
         latencyController.reset()
+        activeChunkDurationMs = CHUNK_MS
+        chunker.reconfigure(CHUNK_MS, OVERLAP_MS)
         highestEmittedSequence = Long.MIN_VALUE
         projection.registerCallback(projectionCallback, android.os.Handler(mainLooper))
 
@@ -236,6 +239,12 @@ class LiveCaptureService : Service() {
         }
         record.startRecording()
         publishStatus("capture_started", "AudioPlaybackCapture + AudioRecord يعملان الآن")
+        if (!useStreamingStt && workerProvider == SubtitleSettings.STT_OMNIROUTE) {
+            publishStatus(
+                "omniroute_chunked_live",
+                "OmniRoute يعمل بوضع المقاطع الصوتية المتتابعة عبر HTTP؛ واجهة audio/transcriptions لا توفر جلسة WebSocket حية."
+            )
+        }
 
         captureExecutor.execute {
             captureLoop(record)
@@ -289,7 +298,8 @@ class LiveCaptureService : Service() {
         // so the newest audio remains close to real time.
         queue.poll()
         queue.offer(work)
-        publishStatus("backpressure", "تم إسقاط chunk قديم للحفاظ على زمن الاستجابة")
+        latencyController.recordQueuePressure()
+        publishStatus("backpressure", "تم إسقاط chunk قديم للحفاظ على زمن الاستجابة؛ queue=${queue.size}/${QUEUE_CAPACITY}")
     }
 
     private fun shouldUseDeepgramStreaming(): Boolean {
@@ -409,6 +419,7 @@ class LiveCaptureService : Service() {
 
     private fun processWork(chunk: AudioChunker.Chunk, workSessionId: Long) {
         if (workSessionId != sessionId || !running.get()) return
+        val sttStartedAt = SystemClock.elapsedRealtime()
         try {
             val result = router.processChunk(
                 chunk,
@@ -458,14 +469,21 @@ class LiveCaptureService : Service() {
                 recordSttQuality(finalCue)
                 submitTranslation(finalCue, workSessionId)
             }
+            val sttProcessingMs = (SystemClock.elapsedRealtime() - sttStartedAt).coerceAtLeast(1L)
+            latencyController.recordSttProcessing(sttProcessingMs, chunk.durationMs)
+            publishStatus(
+                "stt_performance",
+                "STT processing=${sttProcessingMs}ms; audio=${chunk.durationMs}ms; recommendedChunk=${latencyController.recommendedChunkDurationMs()}ms; queue=${queue.size}/${QUEUE_CAPACITY}"
+            )
             if (result.providerFailures > 0) {
                 publishStatus("provider_error", "فشل STT لهذا chunk وتمت معالجة الخطأ دون إيقاف الالتقاط")
             }
             if (!useStreamingStt) {
                 val recommended = latencyController.recommendedChunkDurationMs()
-                if (recommended != CHUNK_MS) {
+                if (recommended != activeChunkDurationMs) {
                     chunker.reconfigure(recommended, minOf(OVERLAP_MS, recommended / 8L))
-                    publishStatus("latency_adapted", "تم ضبط حجم chunk إلى ${recommended}ms بناءً على قياس التأخير الفعلي")
+                    activeChunkDurationMs = recommended
+                    publishStatus("latency_adapted", "تم ضبط حجم chunk إلى ${recommended}ms بناءً على قياس STT والضغط والتأخير الفعلي")
                 }
             }
         } catch (t: Throwable) {
@@ -543,6 +561,7 @@ class LiveCaptureService : Service() {
             SubtitleSettings.STT_DEEPGRAM -> ProviderConnectionTester.DEEPGRAM
             SubtitleSettings.STT_GROQ -> ProviderConnectionTester.GROQ
             SubtitleSettings.STT_OPENAI -> ProviderConnectionTester.OPENAI
+            SubtitleSettings.STT_OMNIROUTE -> ProviderConnectionTester.OMNIROUTE
             else -> null
         } ?: return
         runCatching {
@@ -591,6 +610,7 @@ class LiveCaptureService : Service() {
         try { mediaProjection?.stop() } catch (_: Throwable) {}
         mediaProjection = null
         chunker.reset()
+        activeChunkDurationMs = CHUNK_MS
         latencyController.reset()
         queue.clear()
         deduplicator.clear()

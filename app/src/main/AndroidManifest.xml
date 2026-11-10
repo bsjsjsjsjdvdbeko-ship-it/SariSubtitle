@@ -34,6 +34,7 @@
         <activity android:name="com.sari.subtitle.PremiumCenterActivity" android:exported="false" />
         <activity android:name="com.sari.subtitle.ProviderCenterActivity" android:exported="false" />
         <activity android:name="com.sari.subtitle.ProviderBenchmarkCenterActivity" android:exported="false" />
+        <activity android:name="com.sari.subtitle.SttProviderBenchmarkActivity" android:exported="false" />
         <activity android:name="com.sari.subtitle.ProviderDecisionDashboardActivity" android:exported="false" />
         <activity android:name="com.sari.subtitle.LocalMediaPlayerActivity" android:exported="false" android:screenOrientation="sensor" />
 

@@ -11,6 +11,9 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.SocketTimeoutException
+import java.net.ConnectException
+import java.net.UnknownHostException
 import java.util.Locale
 
 /** تفريغ ملف صوتي محلي بطلب واحد إلى Groq Whisper. */
@@ -27,6 +30,14 @@ class OmniRouteWhisperService(
     }
 
     data class Result(val language: String, val text: String, val srt: String, val segmentCount: Int)
+
+    private class HttpFailure(
+        val statusCode: Int,
+        message: String,
+        val retryAfterMs: Long?
+    ) : IOException(message) {
+        val retryable: Boolean get() = statusCode == 408 || statusCode == 429 || statusCode in 500..599
+    }
 
     /** استدعِ هذه الدالة من thread خلفي، وليس Main Thread. */
     fun transcribe(audioUri: Uri, language: String): Result {
@@ -48,10 +59,54 @@ class OmniRouteWhisperService(
             require(tempFile.length() <= MAX_UPLOAD_BYTES) {
                 "حجم الملف أكبر من 24 MB. لم يُرسل الملف؛ التقطيع غير مفعّل في هذه المرحلة."
             }
-            return sendRequest(tempFile, safeFileName(originalName), apiKey, lang)
+            return sendRequestWithRetry(tempFile, safeFileName(originalName), apiKey, lang)
         } finally {
             tempFile.delete()
         }
+    }
+
+    private fun sendRequestWithRetry(
+        file: File,
+        fileName: String,
+        apiKey: String,
+        language: String
+    ): Result {
+        var lastError: IOException? = null
+        for (attempt in 0..2) {
+            try {
+                return sendRequest(file, fileName, apiKey, language)
+            } catch (e: HttpFailure) {
+                lastError = e
+                if (!e.retryable || attempt == 2) throw e
+                val delay = (e.retryAfterMs ?: (500L shl attempt)).coerceIn(500L, 5_000L)
+                try { Thread.sleep(delay) } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw IOException("تم إلغاء إعادة محاولة OmniRoute", e)
+                }
+            } catch (e: SocketTimeoutException) {
+                lastError = e
+                if (attempt == 2) throw e
+                try { Thread.sleep(500L shl attempt) } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw IOException("تم إلغاء إعادة محاولة OmniRoute", e)
+                }
+            } catch (e: ConnectException) {
+                lastError = e
+                if (attempt == 2) throw e
+                try { Thread.sleep(500L shl attempt) } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw IOException("تم إلغاء إعادة محاولة OmniRoute", e)
+                }
+            } catch (e: UnknownHostException) {
+                lastError = e
+                if (attempt == 2) throw e
+                try { Thread.sleep(500L shl attempt) } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw IOException("تم إلغاء إعادة محاولة OmniRoute", e)
+                }
+            }
+        }
+        throw lastError ?: IOException("تعذر إرسال طلب OmniRoute")
     }
 
     private fun sendRequest(
@@ -149,7 +204,9 @@ class OmniRouteWhisperService(
                 } catch (_: Exception) {
                     responseBody.take(500)
                 }
-                throw IOException("فشل OmniRoute STT (HTTP $statusCode): $message")
+                val retryAfter = connection.getHeaderField("Retry-After")?.trim()?.toLongOrNull()
+                    ?.let { (it * 1_000L).coerceIn(500L, 30_000L) }
+                throw HttpFailure(statusCode, "فشل OmniRoute STT (HTTP $statusCode): $message", retryAfter)
             }
             
             return parseResponse(responseBody, language)

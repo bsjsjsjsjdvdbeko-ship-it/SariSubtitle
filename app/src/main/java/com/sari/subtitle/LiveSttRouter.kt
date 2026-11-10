@@ -151,8 +151,10 @@ class LiveSttRouter(private val context: Context) {
     }
 
     private fun healthId(provider: String): String = when (provider) {
+        SubtitleSettings.STT_OMNIROUTE -> ProviderConnectionTester.OMNIROUTE
         SubtitleSettings.STT_DEEPGRAM -> ProviderConnectionTester.DEEPGRAM
         SubtitleSettings.STT_OPENAI -> ProviderConnectionTester.OPENAI
+        SubtitleSettings.STT_GROQ -> ProviderConnectionTester.GROQ
         else -> ProviderConnectionTester.GROQ
     }
 

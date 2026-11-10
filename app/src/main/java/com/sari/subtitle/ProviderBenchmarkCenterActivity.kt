@@ -110,6 +110,10 @@ class ProviderBenchmarkCenterActivity : Activity() {
             text = "تشغيل Benchmark لكل المزوّدين المهيئين"
             setOnClickListener { runAll() }
         })
+        addView(Button(this@ProviderBenchmarkCenterActivity).apply {
+            text = "فتح مقارنة STT الصوتية — Groq / Deepgram / OmniRoute"
+            setOnClickListener { startActivity(android.content.Intent(this@ProviderBenchmarkCenterActivity, SttProviderBenchmarkActivity::class.java)) }
+        })
         addView(TextView(this@ProviderBenchmarkCenterActivity).apply {
             text = "عدد الحالات: ${cases.size} • الهدف: العربية (ar)"
             textSize = 11f
