@@ -291,7 +291,10 @@ object SrtTranslationService {
             var batchResults: List<String>? = null
             var batchProvider = "none"
             val providerFailures = mutableListOf<String>()
-            val configuredTranslationProviders = listOf(ProviderConnectionTester.OMNIROUTE, ProviderConnectionTester.GEMINI)
+            val gatewayOnly = settings?.omniRouteEnabled == true ||
+                settings?.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE
+            val configuredTranslationProviders = if (gatewayOnly) listOf(ProviderConnectionTester.OMNIROUTE)
+                else listOf(ProviderConnectionTester.OMNIROUTE, ProviderConnectionTester.GEMINI)
             val adaptiveProfile = context?.let { AdaptiveContextStore.get(it) }
             val adaptiveSnapshot = context?.let {
                 AdaptiveRoutingEngine.snapshot(
@@ -312,9 +315,9 @@ object SrtTranslationService {
                         ProviderConnectionTester.GEMINI -> settings.hasGeminiApiKey()
                         else -> false
                     } },
-                    forceProvider = when (settings.translationProvider) {
-                        SubtitleSettings.TRANSLATION_OMNIROUTE -> ProviderConnectionTester.OMNIROUTE
-                        SubtitleSettings.TRANSLATION_GEMINI -> ProviderConnectionTester.GEMINI
+                    forceProvider = when {
+                        gatewayOnly -> ProviderConnectionTester.OMNIROUTE
+                        settings.translationProvider == SubtitleSettings.TRANSLATION_GEMINI -> ProviderConnectionTester.GEMINI
                         else -> null
                     },
                     task = ProviderScoringEngine.Task.TRANSLATION,
@@ -472,6 +475,9 @@ object SrtTranslationService {
             for ((batchIndex, cue) in batch.withIndex()) {
                 if (shouldCancel()) throw java.util.concurrent.CancellationException("ألغى المستخدم العملية")
                 val providerResult = batchResults?.getOrNull(batchIndex)?.takeIf { it.isNotBlank() }
+                if (providerResult == null && gatewayOnly) {
+                    throw IllegalStateException("تعذر إكمال الترجمة عبر بوابة OmniRoute. لم يتم تجاوز البوابة إلى مزود خارجي مباشر.")
+                }
                 if (providerResult != null) primaryResultsUsed++ else textFallbackResultsUsed++
                 val translated = providerResult ?: try {
                     val fallback = translateText(cue.text, sourceLang, targetLang, settings, shouldCancel, context)
@@ -594,6 +600,9 @@ object SrtTranslationService {
     ): String {
         if (shouldCancel()) throw java.util.concurrent.CancellationException("تم إلغاء العملية")
         if (text.isBlank()) return text
+        if (settings?.omniRouteEnabled == true || settings?.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE) {
+            throw IllegalStateException("تعذر مسار OmniRoute؛ لم يتم تجاوز البوابة إلى مزود ترجمة مباشر.")
+        }
         if (text.length > 450) throw IllegalArgumentException("أحد مقاطع الترجمة طويل جداً؛ قصّره أو قسّمه")
         val failures = mutableListOf<String>()
 

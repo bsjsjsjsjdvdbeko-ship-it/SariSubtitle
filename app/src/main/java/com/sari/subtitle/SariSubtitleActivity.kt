@@ -747,6 +747,7 @@ class SariSubtitleActivity : AppCompatActivity() {
     }
 
     private fun downloadAndTranscribeDirectMedia(link: String, language: String) {
+        if (!requireExternalProcessingDisclosure { downloadAndTranscribeDirectMedia(link, language) }) return
         val cancellation = OperationCancellation()
         beginTrackedOperation(cancellation)
         val progress = ProgressDialog(this).apply {
@@ -1892,12 +1893,29 @@ class SariSubtitleActivity : AppCompatActivity() {
         } catch (_: Exception) { null }
     }
 
+    /** Explain off-device processing before the first cloud transcription/translation request. */
+    private fun requireExternalProcessingDisclosure(onAccepted: () -> Unit): Boolean {
+        if (settings.externalProcessingDisclosureAccepted) return true
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("تنبيه الخصوصية ومعالجة البيانات")
+            .setMessage("لإنشاء ترجمة سحابية، قد يُرسل الصوت إلى خدمة تحويل الكلام إلى نص، ثم يُرسل النص المستخرج إلى خدمة ترجمة خارجية عبر حساباتك المرتبطة. قد تُطبّق حصص أو رسوم حسب حساباتك وإعدادات OmniRoute. لا تتابع إذا كان المحتوى حساساً أو لا توافق على المعالجة خارج الجهاز.")
+            .setCancelable(false)
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton("أوافق وأتابع") { _, _ ->
+                settings.externalProcessingDisclosureAccepted = true
+                onAccepted()
+            }
+            .show()
+        return false
+    }
+
     /** Transcribes a selected local audio or video file, then translates the generated SRT to Arabic. */
     private fun transcribeDownloadedVideo(uri: Uri) {
         if (!hasSelectedSttKey()) {
-            Toast.makeText(this, "أضف مفتاح Groq أو ثبّت نموذج Vosk المحلي من الإعدادات أولاً", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "جهّز مسار التفريغ من الإعدادات أولاً", Toast.LENGTH_LONG).show()
             return
         }
+        if (!requireExternalProcessingDisclosure { transcribeDownloadedVideo(uri) }) return
         // Capture source identity before background transcription so navigation during processing cannot rebind the SRT.
         val sourceForTranscription = resolvePickedMediaSource(uri)
         val sourceDisplayName = queryDisplayName(uri)?.takeIf { it.isNotBlank() }
@@ -1923,7 +1941,7 @@ class SariSubtitleActivity : AppCompatActivity() {
                 val isAudioFile = mimeType.startsWith("audio/") ||
                     displayName.substringAfterLast('.', "") in setOf("mp3", "m4a", "aac", "wav", "ogg", "opus", "flac", "amr", "3gp")
                 val selectedIsLocal = settings.sttProvider == SubtitleSettings.STT_LOCAL
-                val cloudKeyAvailable = settings.groqApiKey.isNotBlank() || settings.deepgramApiKey.isNotBlank() || settings.openAiApiKey.isNotBlank()
+                val cloudKeyAvailable = settings.omniRouteEnabled || settings.groqApiKey.isNotBlank() || settings.deepgramApiKey.isNotBlank() || settings.openAiApiKey.isNotBlank()
                 // Audio files (MP3/M4A/WAV, etc.) go directly to the selected transcriber;
                 // only video files need their audio track extracted for cloud STT.
                 val result = if (isAudioFile || selectedIsLocal || !cloudKeyAvailable) {
@@ -2025,9 +2043,10 @@ class SariSubtitleActivity : AppCompatActivity() {
 
     private fun sendToGroq(audioBytes: ByteArray) {
         if (!hasSelectedSttKey()) {
-            Toast.makeText(this, "جهّز مزود التفريغ من الإعدادات (مفتاح API أو نموذج Vosk المحلي) أولاً", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "جهّز مسار التفريغ من الإعدادات أولاً", Toast.LENGTH_LONG).show()
             return
         }
+        if (!requireExternalProcessingDisclosure { sendToGroq(audioBytes) }) return
 
         val cancellation = OperationCancellation()
         beginTrackedOperation(cancellation)
@@ -2260,10 +2279,13 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
     private fun hasSelectedSttKey(): Boolean {
         val hasLocalModel = VoskModelManager.isInstalled(applicationContext, VoskModelManager.ARABIC) ||
             VoskModelManager.isInstalled(applicationContext, VoskModelManager.ENGLISH)
+        if ((settings.omniRouteEnabled || settings.sttProvider == SubtitleSettings.STT_OMNIROUTE) &&
+            settings.sttProvider != SubtitleSettings.STT_LOCAL) return true
         return when (settings.sttProvider) {
             SubtitleSettings.STT_LOCAL -> hasLocalModel
             SubtitleSettings.STT_OPENAI -> settings.openAiApiKey.isNotBlank() || hasLocalModel
-            SubtitleSettings.STT_AUTO -> settings.groqApiKey.isNotBlank() || settings.deepgramApiKey.isNotBlank() || hasLocalModel
+            SubtitleSettings.STT_OMNIROUTE -> settings.omniRouteEnabled || hasLocalModel
+            SubtitleSettings.STT_AUTO -> (settings.omniRouteEnabled || settings.groqApiKey.isNotBlank() || settings.deepgramApiKey.isNotBlank()) || hasLocalModel
             SubtitleSettings.STT_DEEPGRAM -> settings.deepgramApiKey.isNotBlank() || settings.groqApiKey.isNotBlank() || hasLocalModel
             else -> settings.groqApiKey.isNotBlank() || settings.deepgramApiKey.isNotBlank() || hasLocalModel
         }
@@ -2286,6 +2308,10 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                 }
                 SelectedTranscriptionResult(result.language, result.text, result.srt, result.segmentCount)
             }
+            SubtitleSettings.STT_OMNIROUTE -> {
+                val result = OmniRouteWhisperService(applicationContext, settings).transcribe(uri, language)
+                SelectedTranscriptionResult(result.language, result.text, result.srt, result.segmentCount)
+            }
             else -> {
                 val result = GroqWhisperService(applicationContext) { settings.groqApiKey }.transcribe(uri, language)
                 SelectedTranscriptionResult(result.language, result.text, result.srt, result.segmentCount)
@@ -2295,17 +2321,22 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
         val selected = settings.sttProvider
         val hasLocalModel = VoskModelManager.isInstalled(applicationContext, VoskModelManager.ARABIC) ||
             VoskModelManager.isInstalled(applicationContext, VoskModelManager.ENGLISH)
-        val cloudPool = when (selected) {
+        val cloudPool = if ((settings.omniRouteEnabled || selected == SubtitleSettings.STT_OMNIROUTE) && selected != SubtitleSettings.STT_LOCAL) {
+            listOf(SubtitleSettings.STT_OMNIROUTE)
+        } else when (selected) {
             SubtitleSettings.STT_LOCAL -> emptyList()
             // Stage 38: runtime routing starts from the user's selected policy, then
             // reorders only the configured cloud providers using measured health.
-            SubtitleSettings.STT_AUTO -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
+            SubtitleSettings.STT_AUTO -> if (settings.omniRouteEnabled) listOf(SubtitleSettings.STT_OMNIROUTE)
+                else listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
+            SubtitleSettings.STT_OMNIROUTE -> listOf(SubtitleSettings.STT_OMNIROUTE)
             SubtitleSettings.STT_DEEPGRAM -> listOf(SubtitleSettings.STT_DEEPGRAM, SubtitleSettings.STT_GROQ)
             SubtitleSettings.STT_GROQ -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
             else -> listOf(SubtitleSettings.STT_OPENAI)
         }.filter { provider -> when (provider) {
             SubtitleSettings.STT_DEEPGRAM -> settings.deepgramApiKey.isNotBlank()
             SubtitleSettings.STT_OPENAI -> settings.openAiApiKey.isNotBlank()
+            SubtitleSettings.STT_OMNIROUTE -> settings.omniRouteEnabled || selected == SubtitleSettings.STT_OMNIROUTE
             else -> settings.groqApiKey.isNotBlank()
         } }
         val adaptiveProfile = AdaptiveContextStore.get(applicationContext)
@@ -2324,9 +2355,14 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                 ProviderConnectionTester.GROQ -> settings.groqApiKey.isNotBlank()
                 ProviderConnectionTester.DEEPGRAM -> settings.deepgramApiKey.isNotBlank()
                 ProviderConnectionTester.OPENAI -> settings.openAiApiKey.isNotBlank()
+                ProviderConnectionTester.OMNIROUTE -> settings.omniRouteEnabled || selected == SubtitleSettings.STT_OMNIROUTE
                 else -> false
             } },
-            forceProvider = if (selected == SubtitleSettings.STT_AUTO || selected == SubtitleSettings.STT_LOCAL) null else sttProviderHealthId(selected),
+            forceProvider = when {
+                (settings.omniRouteEnabled || selected == SubtitleSettings.STT_OMNIROUTE) && selected != SubtitleSettings.STT_LOCAL -> ProviderConnectionTester.OMNIROUTE
+                selected == SubtitleSettings.STT_AUTO || selected == SubtitleSettings.STT_LOCAL -> null
+                else -> sttProviderHealthId(selected)
+            },
             task = ProviderScoringEngine.Task.STT,
             adaptiveContext = adaptiveSnapshot
         ).map { sttHealthIdToProvider(it.id) }.filter { it in cloudPool }
@@ -2335,13 +2371,14 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
 
         if (providers.isEmpty()) {
             val message = if (selected == SubtitleSettings.STT_AUTO)
-                "لا يوجد مزود جاهز للوضع التلقائي. أضف مفتاح Groq أو Deepgram، أو نزّل نموذج Vosk المحلي من الإعدادات. لن يُستخدم OpenAI تلقائياً لأنه قد يتطلب دفعاً."
+                if (settings.omniRouteEnabled) "بوابة التوجيه غير جاهزة. تحقق من عنوانها ومفتاحها أو نزّل نموذج التفريغ المحلي."
+                else "لا يوجد مزود سحابي جاهز. أضف إعدادات خدمة متاحة أو نزّل نموذج التفريغ المحلي."
             else "لا يوجد مزود تفريغ جاهز. أضف مفتاح المزود المختار أو نزّل نموذج Vosk المحلي من الإعدادات."
             throw IllegalStateException(message)
         }
         val failures = mutableListOf<String>()
         val operationStarted = android.os.SystemClock.elapsedRealtime()
-        recordOperation("تحويل الصوت إلى نص", "اختيار تلقائي", "Groq → Deepgram → Vosk", operationStarted,
+        recordOperation("تحويل الصوت إلى نص", "اختيار تلقائي", if (settings.omniRouteEnabled) "البوابة الذكية" else "السحابي أو المحلي", operationStarted,
             "قيد التنفيذ", "${providers.size} مزود متاح", "selected=$selected")
         for (provider in providers.distinct()) {
             val attemptStarted = android.os.SystemClock.elapsedRealtime()
@@ -2349,12 +2386,14 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                 SubtitleSettings.STT_DEEPGRAM -> "Deepgram"
                 SubtitleSettings.STT_OPENAI -> "OpenAI"
                 SubtitleSettings.STT_LOCAL -> "Vosk"
+                SubtitleSettings.STT_OMNIROUTE -> "بوابة التوجيه"
                 else -> "Groq"
             }
             val modelName = when (provider) {
                 SubtitleSettings.STT_DEEPGRAM -> "Nova-3"
                 SubtitleSettings.STT_OPENAI -> "Whisper API"
                 SubtitleSettings.STT_LOCAL -> "Vosk offline"
+                SubtitleSettings.STT_OMNIROUTE -> "تلقائي"
                 else -> "Whisper"
             }
             try {
@@ -2380,6 +2419,7 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                         SubtitleSettings.STT_DEEPGRAM -> "Deepgram"
                         SubtitleSettings.STT_OPENAI -> "OpenAI"
                         SubtitleSettings.STT_LOCAL -> "Vosk المحلي دون إنترنت"
+                        SubtitleSettings.STT_OMNIROUTE -> "المسار الذكي"
                         else -> "Groq"
                     }
                     val notice = when {
@@ -2405,6 +2445,7 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
                     SubtitleSettings.STT_DEEPGRAM -> "Deepgram"
                     SubtitleSettings.STT_OPENAI -> "OpenAI"
                     SubtitleSettings.STT_LOCAL -> "Vosk المحلي"
+                    SubtitleSettings.STT_OMNIROUTE -> "المسار الذكي"
                     else -> "Groq"
                 }
                 val error = (e.message ?: "فشل غير معروف").take(240)
@@ -2420,12 +2461,14 @@ private data class SelectedTranscriptionResult(val language: String, val text: S
     private fun sttProviderHealthId(provider: String): String = when (provider) {
         SubtitleSettings.STT_DEEPGRAM -> ProviderConnectionTester.DEEPGRAM
         SubtitleSettings.STT_OPENAI -> ProviderConnectionTester.OPENAI
+        SubtitleSettings.STT_OMNIROUTE -> ProviderConnectionTester.OMNIROUTE
         else -> ProviderConnectionTester.GROQ
     }
 
     private fun sttHealthIdToProvider(provider: String): String = when (provider) {
         ProviderConnectionTester.DEEPGRAM -> SubtitleSettings.STT_DEEPGRAM
         ProviderConnectionTester.OPENAI -> SubtitleSettings.STT_OPENAI
+        ProviderConnectionTester.OMNIROUTE -> SubtitleSettings.STT_OMNIROUTE
         else -> SubtitleSettings.STT_GROQ
     }
 
@@ -3002,9 +3045,10 @@ private fun openAudioPicker() {
 
     private fun runGroqTranscription(uri: Uri, language: String) {
         if (!hasSelectedSttKey()) {
-            Toast.makeText(this, "جهّز مزود التفريغ من الإعدادات (مفتاح API أو نموذج Vosk المحلي) أولاً", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "جهّز مسار التفريغ من الإعدادات أولاً", Toast.LENGTH_LONG).show()
             return
         }
+        if (!requireExternalProcessingDisclosure { runGroqTranscription(uri, language) }) return
 
         val cancellation = OperationCancellation()
         beginTrackedOperation(cancellation)

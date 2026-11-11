@@ -41,7 +41,10 @@ class LiveTranslationRouter(private val context: Context) {
         val contextText = history.takeLast(3).map { item ->
             "${item.sourceLanguage}: ${item.sourceText} → ${item.translatedText}"
         }
-        val configured = listOf(ProviderConnectionTester.OMNIROUTE, ProviderConnectionTester.GEMINI)
+        val gatewayOnly = settings.omniRouteEnabled ||
+            settings.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE
+        val configured = if (gatewayOnly) listOf(ProviderConnectionTester.OMNIROUTE)
+            else listOf(ProviderConnectionTester.GEMINI)
         val adaptive = AdaptiveContextStore.get(context)
         val snapshot = AdaptiveRoutingEngine.snapshot(
             context = context,
@@ -52,7 +55,7 @@ class LiveTranslationRouter(private val context: Context) {
             speechSpeedWpm = adaptive.speechSpeedWpm
         )
         val configuredFn: (String) -> Boolean = { id -> when (id) {
-            ProviderConnectionTester.OMNIROUTE -> settings.omniRouteEnabled || settings.hasOmniRouteApiKey() || settings.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE
+            ProviderConnectionTester.OMNIROUTE -> settings.omniRouteEnabled || settings.translationProvider == SubtitleSettings.TRANSLATION_OMNIROUTE
             ProviderConnectionTester.GEMINI -> settings.hasGeminiApiKey()
             else -> false
         } }
@@ -60,9 +63,9 @@ class LiveTranslationRouter(private val context: Context) {
             context = context,
             providers = configured,
             configured = configuredFn,
-            forceProvider = when (settings.translationProvider) {
-                SubtitleSettings.TRANSLATION_OMNIROUTE -> ProviderConnectionTester.OMNIROUTE
-                SubtitleSettings.TRANSLATION_GEMINI -> ProviderConnectionTester.GEMINI
+            forceProvider = when {
+                gatewayOnly -> ProviderConnectionTester.OMNIROUTE
+                settings.translationProvider == SubtitleSettings.TRANSLATION_GEMINI -> ProviderConnectionTester.GEMINI
                 else -> null
             },
             task = ProviderScoringEngine.Task.TRANSLATION,
@@ -95,11 +98,14 @@ class LiveTranslationRouter(private val context: Context) {
             )
         } catch (e: CancellationException) {
             throw e
-        } catch (_: ProviderDecisionFailoverController.ExhaustedException) {
-            // Continue to the pre-existing secondary text-only fallback chain below.
+        } catch (e: ProviderDecisionFailoverController.ExhaustedException) {
+            // Gateway-only mode must not silently bypass the owner's OmniRoute routing/account policy.
+            if (gatewayOnly) throw IllegalStateException(
+                "تعذر إكمال الترجمة عبر المسار الذكي. تحقق من اتصال بوابة OmniRoute وحساباتها المرتبطة.", e
+            )
         }
 
-        // Reuse the existing text-only fallback chain for users who configured Azure/Hugging Face/DeepL.
+        // Direct text fallbacks are retained only when gateway-only mode is not selected.
         return try {
             val started = android.os.SystemClock.elapsedRealtime()
             val translated = SrtTranslationService.translateLiveText(

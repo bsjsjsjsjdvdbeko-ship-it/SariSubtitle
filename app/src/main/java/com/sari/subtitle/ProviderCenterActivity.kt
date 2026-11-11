@@ -21,16 +21,8 @@ import java.util.Locale
 class ProviderCenterActivity : Activity() {
     private lateinit var root: LinearLayout
     private val settings by lazy { SubtitleSettings(applicationContext) }
-    private val providers = listOf(
-        ProviderConnectionTester.GROQ,
-        ProviderConnectionTester.DEEPGRAM,
-        ProviderConnectionTester.GEMINI,
-        ProviderConnectionTester.OMNIROUTE,
-        ProviderConnectionTester.DEEPL,
-        ProviderConnectionTester.AZURE,
-        ProviderConnectionTester.HUGGING_FACE,
-        ProviderConnectionTester.OPENAI
-    )
+    // All upstream accounts are managed in OmniRoute. The app tests only its gateway.
+    private val providers = listOf(ProviderConnectionTester.OMNIROUTE)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,16 +35,8 @@ class ProviderCenterActivity : Activity() {
         val scroll = ScrollView(this)
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(28)) }
         content.addView(hero())
-        content.addView(section("STT — Speech-to-Text", "حالة Groq وDeepgram وOpenAI قبل استخدامها"))
-        content.addView(providerCard(ProviderConnectionTester.GROQ, "Whisper / API models", settings.hasGroqApiKey()))
-        content.addView(providerCard(ProviderConnectionTester.DEEPGRAM, "Nova-3 / Projects API", settings.hasDeepgramApiKey()))
-        content.addView(providerCard(ProviderConnectionTester.OPENAI, "Whisper / Models API", settings.hasOpenAiApiKey()))
-        content.addView(section("Translation — الترجمة", "اختبار مصادقة منخفض الحمولة؛ لا يُرسل صوتًا أو SRT"))
-        content.addView(providerCard(ProviderConnectionTester.GEMINI, "Gemini Models API", settings.hasGeminiApiKey()))
-        content.addView(providerCard(ProviderConnectionTester.OMNIROUTE, "OpenAI-compatible /v1/models", settings.omniRouteEnabled || settings.hasOmniRouteApiKey()))
-        content.addView(providerCard(ProviderConnectionTester.DEEPL, "Usage API", settings.hasDeepLApiKey()))
-        content.addView(providerCard(ProviderConnectionTester.AZURE, "Translator API", settings.hasAzureTranslatorKey()))
-        content.addView(providerCard(ProviderConnectionTester.HUGGING_FACE, "whoami-v2", settings.hasHuggingFaceToken()))
+        content.addView(section("الخدمات المتصلة", "تُدار حسابات OAuth ومفاتيح الخدمات من لوحة OmniRoute؛ التطبيق لا يعرض تفاصيلها."))
+        content.addView(providerCard(ProviderConnectionTester.OMNIROUTE, "توجيه مهام الصوت والترجمة عبر البوابة", settings.omniRouteEnabled || settings.hasOmniRouteApiKey()))
         content.addView(section("اختيار المسار", "Stage 38 يفعّل الاختيار الديناميكي حسب Health وLatency وCircuit Breaker؛ Vosk يبقى fallback محلياً"))
         content.addView(selectionCard())
         scroll.addView(content)
@@ -65,7 +49,7 @@ class ProviderCenterActivity : Activity() {
         setPadding(dp(12), dp(12), dp(12), dp(8))
         addView(Button(this@ProviderCenterActivity).apply { text = "‹"; setOnClickListener { finish() } }, LinearLayout.LayoutParams(dp(48), dp(48)))
         addView(TextView(this@ProviderCenterActivity).apply {
-            text = "مركز مزوّدي الخدمات"; textSize = 19f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD
+            text = "مركز الخدمات الذكي"; textSize = 19f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD
             setPadding(dp(8), 0, 0, 0)
         }, LinearLayout.LayoutParams(0, -2, 1f))
         addView(TextView(this@ProviderCenterActivity).apply {
@@ -82,8 +66,8 @@ class ProviderCenterActivity : Activity() {
             textSize = 13f; setTextColor(Color.rgb(190,198,220)); setPadding(0, dp(6), 0, dp(10))
         })
         addView(Button(this@ProviderCenterActivity).apply { text = "اختبار كل المزوّدين المهيئين وتحديث Health"; setOnClickListener { testAll() } })
-        addView(Button(this@ProviderCenterActivity).apply { text = "فتح Provider Benchmark Center — Stage 53"; setOnClickListener { startActivity(android.content.Intent(this@ProviderCenterActivity, ProviderBenchmarkCenterActivity::class.java)) } })
-        addView(Button(this@ProviderCenterActivity).apply { text = "فتح Provider Decision Dashboard — Stage 57"; setOnClickListener { startActivity(android.content.Intent(this@ProviderCenterActivity, ProviderDecisionDashboardActivity::class.java)) } })
+        addView(Button(this@ProviderCenterActivity).apply { text = "تشخيص الأداء المتقدم"; visibility = View.GONE; setOnClickListener { startActivity(android.content.Intent(this@ProviderCenterActivity, ProviderBenchmarkCenterActivity::class.java)) } })
+        addView(Button(this@ProviderCenterActivity).apply { text = "تشخيص قرارات التوجيه"; visibility = View.GONE; setOnClickListener { startActivity(android.content.Intent(this@ProviderCenterActivity, ProviderDecisionDashboardActivity::class.java)) } })
     }
 
     private fun section(title: String, subtitle: String): View = LinearLayout(this).apply {
@@ -94,7 +78,7 @@ class ProviderCenterActivity : Activity() {
 
     private fun providerCard(provider: String, model: String, configured: Boolean): View {
         val card = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(15), dp(14), dp(15), dp(14)); background = rounded(Color.rgb(17,24,42), 16f, Color.rgb(48,59,90)); setMargins(dp(0), dp(5), dp(0), dp(5)) }
-        val title = TextView(this).apply { text = provider; textSize = 15f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD }
+        val title = TextView(this).apply { text = "البوابة الذكية"; textSize = 15f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD }
         val state = TextView(this).apply { textSize = 12f; setTextColor(Color.rgb(167,176,200)); text = stateText(provider, configured) }
         card.addView(title); card.addView(TextView(this).apply { text = model; textSize = 11f; setTextColor(Color.rgb(125,135,160)); setPadding(0, dp(2), 0, dp(5)) }); card.addView(state)
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -108,9 +92,9 @@ class ProviderCenterActivity : Activity() {
         addView(TextView(this@ProviderCenterActivity).apply { text = "STT الأساسي"; textSize = 12f; setTextColor(Color.rgb(167,176,200)) })
         val stt = Spinner(this@ProviderCenterActivity)
         stt.adapter = android.widget.ArrayAdapter(this@ProviderCenterActivity, android.R.layout.simple_spinner_dropdown_item,
-            arrayOf("تلقائي — Groq → Deepgram → Vosk", "Groq", "Deepgram Nova-3", "OpenAI Whisper", "Vosk محلي"))
-        stt.setSelection(when (settings.sttProvider) { SubtitleSettings.STT_GROQ -> 1; SubtitleSettings.STT_DEEPGRAM -> 2; SubtitleSettings.STT_OPENAI -> 3; SubtitleSettings.STT_LOCAL -> 4; else -> 0 })
-        stt.setOnItemSelectedListener(simpleListener { i -> settings.sttProvider = when(i) {1->SubtitleSettings.STT_GROQ;2->SubtitleSettings.STT_DEEPGRAM;3->SubtitleSettings.STT_OPENAI;4->SubtitleSettings.STT_LOCAL;else->SubtitleSettings.STT_AUTO} })
+            arrayOf("تلقائي — البوابة عند تفعيلها", "البوابة الذكية فقط", "تفريغ محلي دون إنترنت"))
+        stt.setSelection(when (settings.sttProvider) { SubtitleSettings.STT_OMNIROUTE -> 1; SubtitleSettings.STT_LOCAL -> 2; else -> 0 })
+        stt.setOnItemSelectedListener(simpleListener { i -> settings.sttProvider = when(i) {1->SubtitleSettings.STT_OMNIROUTE;2->SubtitleSettings.STT_LOCAL;else->SubtitleSettings.STT_AUTO} })
         addView(stt)
         addView(TextView(this@ProviderCenterActivity).apply { text = "الاختيار الحالي: ${settings.sttProviderLabel}. المسار التنفيذي في SariSubtitleActivity يبقى كما هو في Stage 37."; textSize = 11f; setTextColor(Color.rgb(140,150,175)); setPadding(0, dp(5), 0, 0) })
     }

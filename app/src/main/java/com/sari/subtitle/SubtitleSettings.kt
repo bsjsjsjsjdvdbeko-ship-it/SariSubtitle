@@ -120,9 +120,26 @@ class SubtitleSettings(context: Context) {
         get() = prefs.getString("omniroute_stt_model", "whisper-large-v3-turbo") ?: "whisper-large-v3-turbo"
         set(value) = prefs.edit().putString("omniroute_stt_model", value.trim().ifBlank { "whisper-large-v3-turbo" }).apply()
 
+    /** Safe default: never fall back to a billable route automatically. */
+    var omniRouteRoutingMode: String
+        get() = prefs.getString("omniroute_routing_mode", "auto/subscription") ?: "auto/subscription"
+        set(value) = prefs.edit().putString(
+            "omniroute_routing_mode",
+            value.takeIf { it in setOf("auto/subscription", "auto", "auto/cheap") } ?: "auto/subscription"
+        ).apply()
+
+    var omniRoutePaidFallbackAllowed: Boolean
+        get() = prefs.getBoolean("omniroute_paid_fallback_allowed", false)
+        set(value) = prefs.edit().putBoolean("omniroute_paid_fallback_allowed", value).apply()
+
     var omniRouteEnabled: Boolean
         get() = prefs.getBoolean("omniroute_enabled", false)
         set(value) = prefs.edit().putBoolean("omniroute_enabled", value).apply()
+
+    /** One-time acknowledgement that cloud STT/translation may process audio or text off-device. */
+    var externalProcessingDisclosureAccepted: Boolean
+        get() = prefs.getBoolean("external_processing_disclosure_accepted_v1", false)
+        set(value) = prefs.edit().putBoolean("external_processing_disclosure_accepted_v1", value).apply()
 
     var translationProvider: String
         get() = prefs.getString("translation_provider", TRANSLATION_AUTO) ?: TRANSLATION_AUTO
@@ -174,12 +191,11 @@ class SubtitleSettings(context: Context) {
             else -> STT_GROQ
         }).apply()
     val sttProviderLabel: String get() = when (sttProvider) {
-        STT_AUTO -> "تلقائي — المجاني أولاً"
-        STT_DEEPGRAM -> "Deepgram Nova-3"
-        STT_OPENAI -> "OpenAI Whisper"
-        STT_LOCAL -> "Vosk محلي دون إنترنت"
-        STT_OMNIROUTE -> "OmniRoute Whisper"
-        else -> "Groq Whisper"
+        STT_AUTO -> "تلقائي — التوجيه الذكي عند تفعيله"
+        STT_DEEPGRAM, STT_OPENAI, STT_GROQ -> "مزود سحابي"
+        STT_LOCAL -> "تفريغ محلي دون إنترنت"
+        STT_OMNIROUTE -> "البوابة الذكية"
+        else -> "مزود سحابي"
     }
 
 

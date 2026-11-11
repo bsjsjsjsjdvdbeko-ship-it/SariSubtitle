@@ -16,7 +16,7 @@ import java.net.ConnectException
 import java.net.UnknownHostException
 import java.util.Locale
 
-/** تفريغ ملف صوتي محلي بطلب واحد إلى Groq Whisper. */
+/** تفريغ ملف صوتي محلي عبر نقطة OmniRoute المتوافقة مع OpenAI audio/transcriptions. */
 class OmniRouteWhisperService(
     private val context: Context,
     private val settings: SubtitleSettings
@@ -42,7 +42,7 @@ class OmniRouteWhisperService(
     /** استدعِ هذه الدالة من thread خلفي، وليس Main Thread. */
     fun transcribe(audioUri: Uri, language: String): Result {
         val apiKey = settings.omniRouteApiKey.trim()
-        require(apiKey.isNotEmpty()) { "أدخل مفتاح OmniRoute من الإعدادات أولاً." }
+        // The gateway key is optional when the local OmniRoute instance is configured without auth.
         // "auto" means let Whisper detect the spoken language. In that case
         // omit the optional API language field instead of sending "auto" as a code.
         val lang = language.trim().lowercase(Locale.ROOT)
@@ -52,7 +52,7 @@ class OmniRouteWhisperService(
         val originalName = getDisplayName(audioUri).ifBlank { "audio.wav" }
         val suffix = originalName.substringAfterLast('.', "wav").lowercase(Locale.ROOT)
             .takeIf { it.matches(Regex("[a-z0-9]{1,8}")) } ?: "wav"
-        val tempFile = File.createTempFile("groq_upload_", ".$suffix", context.cacheDir)
+        val tempFile = File.createTempFile("omniroute_upload_", ".$suffix", context.cacheDir)
         try {
             copyUriToFile(audioUri, tempFile)
             require(tempFile.length() > 0L) { "الملف الصوتي فارغ أو تعذر قراءته." }
@@ -115,7 +115,7 @@ class OmniRouteWhisperService(
         apiKey: String,
         language: String
     ): Result {
-        val boundary = "SariGroqBoundary${System.nanoTime()}"
+        val boundary = "SariOmniRouteBoundary${System.nanoTime()}"
         
         // ─── حساب حجم multipart مسبقاً ───
         val textParts = mutableListOf(
@@ -124,8 +124,8 @@ class OmniRouteWhisperService(
             "response_format" to "verbose_json",
             "timestamp_granularities[]" to "segment"
         )
-        // Groq/Whisper expects a language code such as "en" or "ar"; "auto"
-        // is not a valid language code. Omit it so the model detects language.
+        // The OpenAI-compatible transcription API expects a concrete language code;
+        // omit the field for auto-detection rather than sending "auto" as a language.
         if (language.equals("ar", ignoreCase = true) || language.equals("en", ignoreCase = true)) {
             textParts.add(3, "language" to language.lowercase(Locale.ROOT))
         }
@@ -158,7 +158,7 @@ class OmniRouteWhisperService(
             connection.readTimeout = READ_TIMEOUT_MS
             connection.doOutput = true
             connection.useCaches = false
-            connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            if (apiKey.isNotBlank()) connection.setRequestProperty("Authorization", "Bearer $apiKey")
             connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("Connection", "close")
@@ -218,8 +218,9 @@ class OmniRouteWhisperService(
 
     private fun endpoint(): String {
         val base = settings.omniRouteBaseUrl.trim().trimEnd('/')
-        require(base.startsWith("https://") || base.startsWith("http://127.0.0.1:") || base.startsWith("http://localhost:")) {
-            "عنوان OmniRoute غير صالح. استخدم HTTPS أو عنوان localhost المحلي."
+        val parsed = runCatching { URL(base) }.getOrElse { throw IllegalArgumentException("عنوان OmniRoute غير صالح.") }
+        require((parsed.protocol == "https" || parsed.protocol == "http") && parsed.host.isNotBlank()) {
+            "استخدم عنوان HTTP/HTTPS صالحاً لخادم OmniRoute."
         }
         return (if (base.endsWith("/v1")) base else "$base/v1") + "/audio/transcriptions"
     }

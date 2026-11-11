@@ -72,14 +72,17 @@ class LiveSttRouter(private val context: Context) {
             SubtitleSettings.STT_DEEPGRAM -> listOf(SubtitleSettings.STT_DEEPGRAM, SubtitleSettings.STT_GROQ)
             SubtitleSettings.STT_GROQ -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
             SubtitleSettings.STT_OPENAI -> listOf(SubtitleSettings.STT_OPENAI)
-            SubtitleSettings.STT_OMNIROUTE -> listOf(SubtitleSettings.STT_OMNIROUTE, SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
-            else -> listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
+            // Keep the selected gateway path inside OmniRoute; never bypass it with direct provider keys.
+            SubtitleSettings.STT_OMNIROUTE -> listOf(SubtitleSettings.STT_OMNIROUTE)
+            else -> if (settings.omniRouteEnabled) listOf(SubtitleSettings.STT_OMNIROUTE)
+                else listOf(SubtitleSettings.STT_GROQ, SubtitleSettings.STT_DEEPGRAM)
         }.filter { p ->
             when (p) {
                 SubtitleSettings.STT_GROQ -> settings.groqApiKey.isNotBlank()
                 SubtitleSettings.STT_DEEPGRAM -> settings.deepgramApiKey.isNotBlank()
                 SubtitleSettings.STT_OPENAI -> settings.openAiApiKey.isNotBlank()
-                SubtitleSettings.STT_OMNIROUTE -> settings.omniRouteEnabled && settings.hasOmniRouteApiKey()
+                // The gateway may intentionally run without auth (e.g. trusted local instance).
+                SubtitleSettings.STT_OMNIROUTE -> settings.omniRouteEnabled || selected == SubtitleSettings.STT_OMNIROUTE
                 else -> false
             }
         }

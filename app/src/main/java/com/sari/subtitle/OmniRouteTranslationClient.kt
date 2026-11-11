@@ -42,8 +42,15 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
         // Respect the model selected by the user in Translation Providers.
         // "auto" is a supported OmniRoute routing target; do not silently pin
         // requests to a hard-coded model and ignore the saved preference.
-        val selectedModel = modelOverride?.trim()?.takeIf { it.isNotBlank() }
+        val configuredModel = modelOverride?.trim()?.takeIf { it.isNotBlank() }
             ?: settings.omniRouteTextModel.trim().ifBlank { DEFAULT_TRANSLATION_MODEL }
+        val selectedModel = if (configuredModel.equals("auto", ignoreCase = true)) {
+            val routingMode = settings.omniRouteRoutingMode
+            if (routingMode != "auto/subscription" && !settings.omniRoutePaidFallbackAllowed) {
+                throw IOException("تم إيقاف التوجيه الذي قد يستهلك رصيداً مدفوعاً. فعّل الإذن صراحةً من إعدادات OmniRoute أو اختر حصة الاشتراك فقط.")
+            }
+            routingMode
+        } else configuredModel
         val payload = JSONObject()
             .put("model", selectedModel)
             .put("messages", JSONArray()
@@ -96,32 +103,109 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
         return null
     }
 
-    fun availableModelIds(): List<String> {
-        val response = requestJson("/models", null, 45000, 45000)
-        val data = response.optJSONArray("data") ?: return emptyList()
-        return (0 until data.length()).mapNotNull { i ->
-            data.optJSONObject(i)?.optString("id")?.trim()?.takeIf { it.isNotBlank() }
+    /**
+     * Discover the public OpenAI-compatible model list first, then enrich sparse rows
+     * from OmniRoute's documented grouped catalog endpoint when available.
+     */
+    fun availableModels(): List<OmniRouteModel> {
+        val publicResponse = requestJson("/models", null, 45000, 45000)
+        val publicModels = parseModelRows(publicResponse)
+        val needsEnrichment = publicModels.isEmpty() || publicModels.any { it.capabilities.isEmpty() }
+        val catalogModels = if (needsEnrichment) {
+            runCatching { parseCatalogRows(requestJson("/api/models/catalog", null, 45000, 45000)) }
+                .getOrDefault(emptyList())
+        } else emptyList()
+        val merged = linkedMapOf<String, OmniRouteModel>()
+        (publicModels + catalogModels).forEach { candidate ->
+            val previous = merged[candidate.id]
+            merged[candidate.id] = when {
+                previous == null -> candidate
+                candidate.capabilities.size > previous.capabilities.size -> candidate.copy(
+                    ownedBy = candidate.ownedBy.ifBlank { previous.ownedBy },
+                    isFree = candidate.isFree ?: previous.isFree,
+                    authRequired = candidate.authRequired ?: previous.authRequired,
+                    priceLabel = candidate.priceLabel ?: previous.priceLabel
+                )
+                else -> previous.copy(
+                    capabilities = if (candidate.capabilities.size > previous.capabilities.size) candidate.capabilities else previous.capabilities,
+                    ownedBy = previous.ownedBy.ifBlank { candidate.ownedBy },
+                    isFree = previous.isFree ?: candidate.isFree,
+                    authRequired = previous.authRequired ?: candidate.authRequired,
+                    priceLabel = previous.priceLabel ?: candidate.priceLabel
+                )
+            }
+        }
+        return merged.values.sortedBy { it.id.lowercase() }
+    }
+
+    private fun parseModelRows(root: JSONObject): List<OmniRouteModel> {
+        val rows = root.optJSONArray("data") ?: root.optJSONArray("models") ?: return emptyList()
+        return (0 until rows.length()).mapNotNull { index ->
+            OmniRouteModelIntelligence.parse(rows.optJSONObject(index) ?: return@mapNotNull null)
         }
     }
+
+    /** Catalog layouts differ between OmniRoute releases; accept documented provider-grouped forms. */
+    private fun parseCatalogRows(root: JSONObject): List<OmniRouteModel> {
+        val result = mutableListOf<OmniRouteModel>()
+        result += parseModelRows(root)
+        val providers = root.optJSONArray("providers")
+        if (providers != null) {
+            for (i in 0 until providers.length()) {
+                val provider = providers.optJSONObject(i) ?: continue
+                val providerName = provider.optString("id", provider.optString("name", ""))
+                val rows = provider.optJSONArray("models") ?: provider.optJSONArray("data") ?: continue
+                for (j in 0 until rows.length()) {
+                    val model = rows.optJSONObject(j) ?: continue
+                    if (!model.has("owned_by") && providerName.isNotBlank()) model.put("owned_by", providerName)
+                    OmniRouteModelIntelligence.parse(model)?.let(result::add)
+                }
+            }
+        }
+        val providerMap = root.optJSONObject("providers")
+        if (providerMap != null) {
+            val keys = providerMap.keys()
+            while (keys.hasNext()) {
+                val providerName = keys.next()
+                val providerValue = providerMap.opt(providerName)
+                val rows = when (providerValue) {
+                    is JSONArray -> providerValue
+                    is JSONObject -> providerValue.optJSONArray("models") ?: providerValue.optJSONArray("data")
+                    else -> null
+                } ?: continue
+                for (j in 0 until rows.length()) {
+                    val model = rows.optJSONObject(j) ?: continue
+                    if (!model.has("owned_by") && providerName.isNotBlank()) model.put("owned_by", providerName)
+                    OmniRouteModelIntelligence.parse(model)?.let(result::add)
+                }
+            }
+        }
+        return result.distinctBy { it.id }
+    }
+
+    fun availableModelIds(): List<String> = availableModels().map { it.id }
 
     fun findModelId(providerFragment: String): String? = availableModelIds()
         .firstOrNull { it.contains(providerFragment, ignoreCase = true) }
 
     fun testConnection(): String {
-        val models = availableModelIds()
+        val models = availableModels()
         val configuredModel = settings.omniRouteTextModel.trim().ifBlank { DEFAULT_TRANSLATION_MODEL }
         if (!configuredModel.equals("auto", ignoreCase = true) && models.isNotEmpty() &&
-            configuredModel !in models) {
+            models.none { it.id == configuredModel }) {
             throw IOException(
                 "اتصال OmniRoute ناجح، لكن النموذج المحدد غير موجود في /v1/models: $configuredModel. " +
                     "اختر auto أو معرّفاً ظاهراً في قائمة النماذج."
             )
         }
-        return "اتصال OmniRoute ناجح. النماذج الظاهرة: ${models.size}. النموذج المحدد: $configuredModel"
+        val freeKnown = models.count { it.isFree == true }
+        val paidKnown = models.count { it.isFree == false }
+        val unknownCost = models.size - freeKnown - paidKnown
+        return "اتصال OmniRoute ناجح. النماذج: ${models.size}؛ مجانية وفق بيانات الخادم: $freeKnown؛ غير مجانية: $paidKnown؛ السعر غير معروف: $unknownCost. وضع التوجيه: ${settings.omniRouteRoutingMode}."
     }
 
     private fun requestJson(path: String, payload: String?, connectTimeoutMs: Int, readTimeoutMs: Int): JSONObject {
-        val url = endpoint(path)
+        val url = if (path.startsWith("/api/")) rootEndpoint(path) else endpoint(path)
         val conn = NetworkRequestRegistry.register(URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = if (payload == null) "GET" else "POST"
             connectTimeout = connectTimeoutMs
@@ -153,10 +237,21 @@ class OmniRouteTranslationClient(private val settings: SubtitleSettings) {
         } finally { conn.disconnect(); NetworkRequestRegistry.unregister(conn) }
     }
 
+    private fun rootEndpoint(path: String): String {
+        val base = settings.omniRouteBaseUrl.trim().trimEnd('/')
+        val parsed = runCatching { URL(base) }.getOrElse { throw IllegalArgumentException("عنوان OmniRoute غير صالح.") }
+        require((parsed.protocol == "https" || parsed.protocol == "http") && parsed.host.isNotBlank()) {
+            "استخدم عنوان HTTP/HTTPS صالحاً لخادم OmniRoute."
+        }
+        val root = if (base.endsWith("/v1", ignoreCase = true)) base.dropLast(3).trimEnd('/') else base
+        return root + path
+    }
+
     private fun endpoint(path: String): String {
         val base = settings.omniRouteBaseUrl.trim().trimEnd('/')
-        require(base.startsWith("http://127.0.0.1:") || base.startsWith("http://localhost:") || base.startsWith("https://")) {
-            "عنوان OmniRoute غير صالح. استخدم http://127.0.0.1:20128/v1 لخدمة Termux المحلية."
+        val parsed = runCatching { URL(base) }.getOrElse { throw IllegalArgumentException("عنوان OmniRoute غير صالح.") }
+        require((parsed.protocol == "https" || parsed.protocol == "http") && parsed.host.isNotBlank()) {
+            "استخدم عنوان HTTP/HTTPS صالحاً لخادم OmniRoute."
         }
         return if (base.endsWith("/v1")) base + path else "$base/v1$path"
     }

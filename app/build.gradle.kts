@@ -12,7 +12,7 @@ android {
         minSdk = 29
         targetSdk = 35
         versionCode = 25000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
-        versionName = "0.24.0-final-integrated"
+        versionName = "0.25.0-omniroute-free-first"
     }
 
     signingConfigs {
